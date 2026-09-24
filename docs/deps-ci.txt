@@ -1,3 +1,4 @@
+# STATUS: merged into package.json (devDependencies + scripts) on 2026-09-24. Kept for the notes below.
 # CI/tooling dependencies to merge into package.json (owner of package.json: please merge).
 # Verified together on 2026-09-24 against the repo (eslint flat config runs; vitest 2.1.9 coverage).
 

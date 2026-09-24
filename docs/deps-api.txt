@@ -1,3 +1,4 @@
+# STATUS: merged into package.json (devDependencies + scripts) on 2026-09-24. Kept for the notes below.
 # Backend / API test dependencies to merge into package.json (owner of package.json: please merge).
 # Verified on 2026-09-24 against this repo (tests/api run against the hosted project; deno check passes).
 
