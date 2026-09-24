@@ -3,3 +3,6 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/nizamali1-coder/tasknest/security/advisories/new
     about: Report security issues privately. Do not open a public issue.
+  - name: Documentation (README, API contract, CI)
+    url: https://github.com/nizamali1-coder/tasknest#readme
+    about: How TaskNest works, the API contract (docs/API.md) and the CI/CD setup (docs/CI.md).
