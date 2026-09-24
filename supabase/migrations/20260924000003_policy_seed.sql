@@ -1,0 +1,6 @@
+-- Money policy v1. Mirrors DEFAULT_POLICY in supabase/functions/_shared/domain/config.ts.
+insert into money_policies (version, policy) values (1, '{"version":1,"currency":"USD","clientServiceFeeBps":1500,"taskerCommissionBps":1500,"taxBps":0,"cancellation":{"tiers":[{"minHoursBefore":48,"refundBps":10000},{"minHoursBefore":24,"refundBps":5000},{"minHoursBefore":0,"refundBps":0,"chargeMinutesOfRate":60}],"noShowRefundBps":0,"serviceFeeRefundable":true},"taskerPenalty":{"cancelFeeCents":1000,"strikesToSuspend":3,"strikeWindowDays":30},"tips":{"capBpsOfSubtotal":2500,"windowDays":30,"platformFeeBps":0,"allowedTenders":["card"]},"points":{"centsPerPoint":1,"pointsPerDollarCash":1,"minRedeemPoints":500,"maxRedeemBpsOfTotal":10000,"pendingDays":7,"expiryMonths":12,"reissueDaysOnExpiredRefund":30,"reviewBonusPoints":100},"tenderUseOrder":["promo","points","wallet","card"],"refundOrder":["card","wallet","points","promo"],"retentionOrder":["card","wallet","points","promo"],"payouts":{"holdDays":3},"refunds":{"agentLimitCents":10000,"windowDays":30,"providerShare":"proportional"},"auth":{"validityDays":7,"reauthBufferDays":1},"booking":{"taskerResponseHours":24}}'::jsonb);
+
+insert into promo_codes (code, kind, value, first_task_only, max_discount_cents) values
+  ('FIRST20', 'percent', 2000, true, 3000),
+  ('WELCOME10', 'fixed', 1000, false, null);
