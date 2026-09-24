@@ -1,0 +1,19 @@
+# CODEOWNERS for TaskNest. Later rules win. Review from a code owner is required on
+# `main` (see docs/BRANCH_PROTECTION.md).
+
+# Default owner
+*                                   @nizamali1-coder
+
+# Money core: domain logic, API, payments, ledger, schema and their tests.
+/supabase/functions/                @nizamali1-coder
+/supabase/functions/_shared/domain/ @nizamali1-coder
+/supabase/migrations/               @nizamali1-coder
+/tests/unit/                        @nizamali1-coder
+/tests/api/                         @nizamali1-coder
+
+# CI/CD, release and repository policy.
+/.github/                           @nizamali1-coder
+/scripts/ci/                        @nizamali1-coder
+/.coderabbit.yaml                   @nizamali1-coder
+/docs/CI.md                         @nizamali1-coder
+/docs/BRANCH_PROTECTION.md          @nizamali1-coder

@@ -1,0 +1,229 @@
+name: CI
+
+# Every job below is its own required status check on `main` (see docs/BRANCH_PROTECTION.md).
+# Job ids == check names: lint, typecheck, unit, db, api, e2e, build. Do not rename them
+# without updating the ruleset, or merges will block on a check that never reports.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+# One run per PR/branch. Superseded PR runs are cancelled; runs on main are not, so
+# every commit that lands on main gets a complete, auditable result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  SUPABASE_CLI_VERSION: 2.117.0
+  # CI never talks to a real payment provider.
+  PAYMENTS_PROVIDER: fake
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-deps
+      - name: ESLint
+        run: npx eslint . --max-warnings=0
+      - name: Prettier
+        run: npx prettier --check .
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-deps
+      - name: tsc (app, domain, tests)
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Setup Deno (Edge Functions)
+        if: hashFiles('supabase/functions/api/index.ts') != ''
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: deno check (Edge Functions)
+        if: hashFiles('supabase/functions/api/index.ts') != ''
+        run: deno check supabase/functions/api/index.ts
+
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-deps
+      - name: Vitest (tests/unit) with coverage
+        run: >-
+          npx vitest run tests/unit
+          --coverage.enabled
+          --coverage.provider=v8
+          --coverage.include='supabase/functions/_shared/domain/**'
+          --coverage.reporter=text
+          --coverage.reporter=json-summary
+          --coverage.reporter=lcov
+          --coverage.reportsDirectory=coverage
+      - name: Coverage summary
+        if: always() && hashFiles('coverage/coverage-summary.json') != ''
+        run: node scripts/ci/coverage-summary.mjs coverage/coverage-summary.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-unit
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: warn
+
+  db:
+    name: db
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Check supabase/config.toml
+        run: scripts/ci/ensure-supabase-config.sh
+      - name: Start Postgres (supabase db start)
+        run: supabase db start
+      - name: Apply all migrations from scratch
+        # `db reset` drops the local DB and replays every migration in order (+ seed.sql),
+        # proving the migration history applies cleanly to an empty database.
+        run: supabase db reset --local
+      - name: Migration status
+        run: supabase migration list --local
+      - name: Lint schema (plpgsql_check)
+        run: supabase db lint --local --level error --fail-on error
+      - name: SQL invariants (scripts/ci/db_checks.sql)
+        run: |
+          DB_URL="$(supabase status -o env | sed -n 's/^DB_URL="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p')"
+          psql "${DB_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}" \
+            -v ON_ERROR_STOP=1 -f scripts/ci/db_checks.sql
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+  api:
+    name: api
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-deps
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Check supabase/config.toml
+        run: scripts/ci/ensure-supabase-config.sh
+      - name: Start local Supabase
+        run: supabase start -x studio,imgproxy,logflare,vector,supavisor
+      - name: Export local Supabase env
+        run: scripts/ci/supabase-env.sh
+      - name: Serve Edge Functions (PAYMENTS_PROVIDER=fake)
+        run: |
+          printf 'PAYMENTS_PROVIDER=fake\n' > "$RUNNER_TEMP/functions.env"
+          nohup supabase functions serve --env-file "$RUNNER_TEMP/functions.env" \
+            > "$RUNNER_TEMP/functions.log" 2>&1 &
+          scripts/ci/wait-for-http.sh "$API_BASE_URL" 120 "$RUNNER_TEMP/functions.log"
+      - name: API tests (tests/api)
+        run: npx vitest run tests/api
+      - name: Edge Function logs
+        if: always()
+        run: cat "$RUNNER_TEMP/functions.log" || true
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-deps
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Check supabase/config.toml
+        run: scripts/ci/ensure-supabase-config.sh
+      - name: Start local Supabase
+        run: supabase start -x studio,imgproxy,logflare,vector,supavisor
+      - name: Export local Supabase env
+        run: scripts/ci/supabase-env.sh
+      - name: Serve Edge Functions (PAYMENTS_PROVIDER=fake)
+        run: |
+          printf 'PAYMENTS_PROVIDER=fake\n' > "$RUNNER_TEMP/functions.env"
+          nohup supabase functions serve --env-file "$RUNNER_TEMP/functions.env" \
+            > "$RUNNER_TEMP/functions.log" 2>&1 &
+          scripts/ci/wait-for-http.sh "$API_BASE_URL" 120 "$RUNNER_TEMP/functions.log"
+
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      - name: Install Playwright browser + OS deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS deps (browser cached)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Playwright
+        run: npx playwright test
+        env:
+          CI: "true"
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Edge Function logs
+        if: always()
+        run: cat "$RUNNER_TEMP/functions.log" || true
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup || true
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Placeholders: the bundle must build without real credentials. Real values are
+      # injected by Vercel at deploy time.
+      VITE_SUPABASE_URL: http://127.0.0.1:54321
+      VITE_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-deps
+      - name: vite build
+        run: npx vite build
+      - name: Upload dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

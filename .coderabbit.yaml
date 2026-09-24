@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit AI review config for TaskNest. Installed as the CodeRabbit GitHub App
+# (see docs/CI.md). CodeRabbit is an advisory reviewer: it is NOT a required check and
+# never replaces the human CODEOWNERS approval on money code.
+language: en-US
+early_access: false
+
+tone_instructions: >-
+  Be direct and specific. This is a payments marketplace: prioritise money correctness,
+  authorization and data integrity over style nits.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: ["main"]
+    ignore_title_keywords: ["WIP", "[skip review]"]
+  path_filters:
+    - "!**/package-lock.json"
+    - "!dist/**"
+    - "!coverage/**"
+    - "!playwright-report/**"
+    - "!test-results/**"
+    - "!supabase/.temp/**"
+  path_instructions:
+    - path: "supabase/functions/**"
+      instructions: |
+        This is the money path. Review every change for:
+        - Integer cents only. Flag any float arithmetic on money or points (parseFloat,
+          toFixed, `/ 100` on cents, Number division without explicit rounding), and any
+          rounding that is not the documented half-up/bps rule in `_shared/domain/money.ts`.
+        - Ledger balance. Every money event must post exactly one balanced ledger txn via
+          `_shared/domain/ledger.ts` (debits == credits per unit, USD and POINTS never net).
+          Flag money state changes (booking_tenders, refunds, tips, payouts, disputes,
+          points_*) that are not paired with a ledger txn in the same DB transaction.
+        - Idempotency. Every mutating endpoint must honour the `Idempotency-Key` header and
+          return the first result on repeat; webhook handlers must dedupe on the Stripe
+          event id (`stripe_events`). Flag retries that could double-charge, double-refund
+          or double-credit points.
+        - Refund bounds. Refunds per tender must never exceed amount paid minus already
+          refunded (DB constraint `refund_le_paid` is a backstop, not the check).
+        - Policy versioning. Bookings are evaluated with THEIR `policy_version`, never the
+          current default policy.
+        - Authorization. Writes happen only with the service role inside the `api`
+          function after verifying the caller's JWT and role. Flag any trust in
+          client-supplied amounts, user ids or roles.
+        - Payments provider. Never allow `sk_live_` keys; the `fake` provider must stay
+          deterministic.
+        - Logic belongs in `_shared/domain/*.ts` (unit-tested). Flag duplicated money
+          logic in handlers.
+    - path: "supabase/functions/_shared/domain/**"
+      instructions: |
+        Pure money domain logic. Require a unit test in tests/unit for every behaviour
+        change. Check boundary cases: 0 cents, 1 cent, odd cents split across tenders,
+        cancellation tier boundaries (exactly 24h/48h), DST changes, point expiry edges.
+        Sum of per-tender allocations must equal the total exactly (no lost cents).
+    - path: "supabase/migrations/**"
+      instructions: |
+        Migrations are append-only: flag edits to already-merged migration files. Money
+        columns must be bigint cents (never numeric/real/double/money). New tables must
+        `enable row level security` with explicit policies. Keep the ledger balance
+        trigger, `refund_le_paid` and `bookings_no_double_slot` intact. Flag destructive
+        changes (drop/rename column, type narrowing) without a backfill plan, and
+        security definer functions without `set search_path`.
+    - path: "src/**"
+      instructions: |
+        The UI must not compute money itself: amounts shown come from the API quote or
+        `@domain` helpers. Format cents only at render time. Controls used by tests need
+        `data-testid`. Never use the service role key in the browser.
+    - path: "tests/**"
+      instructions: |
+        Tests must assert exact integer cents, not approximate values. Prefer table-driven
+        boundary cases. Flag skipped or `.only` tests.
+    - path: ".github/**"
+      instructions: |
+        Workflows must use least-privilege `permissions:`, pinned action versions, and
+        must not expose secrets to `pull_request_target` or fork PRs. Required check job
+        names (lint, typecheck, unit, db, api, e2e, build) must not be renamed.
+  tools:
+    eslint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local

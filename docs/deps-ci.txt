@@ -1,0 +1,34 @@
+# CI/tooling dependencies to merge into package.json (owner of package.json: please merge).
+# Verified together on 2026-09-24 against the repo (eslint flat config runs; vitest 2.1.9 coverage).
+
+## devDependencies
+eslint                       ^10.11.0
+@eslint/js                   ^10.0.1
+typescript-eslint            ^8.70.1
+eslint-plugin-react-hooks    ^7.1.1
+globals                      ^17.12.0
+prettier                     ^3.9.9
+@vitest/coverage-v8          2.1.9        # must match the installed vitest version exactly (vitest ^2.1.9)
+supabase                     ^2.117.0     # optional: pins the CLI for local `npx supabase ...` (CI uses supabase/setup-cli)
+# already present: typescript, vitest, @playwright/test, @types/node, vite
+
+## scripts (replace / add)
+"lint":        "eslint . --max-warnings=0",
+"format":      "prettier --check .",
+"format:write":"prettier --write .",
+"typecheck":   "tsc --noEmit",
+"test:unit":   "vitest run tests/unit",
+"test:coverage":"vitest run tests/unit --coverage.enabled",
+"test:api":    "vitest run tests/api",
+"test:e2e":    "playwright test",
+"db:check":    "psql \"${SUPABASE_DB_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}\" -v ON_ERROR_STOP=1 -f scripts/ci/db_checks.sql"
+
+# One-command install:
+# npm i -D eslint@^10 @eslint/js@^10 typescript-eslint@^8 eslint-plugin-react-hooks@^7 globals@^17 prettier@^3 @vitest/coverage-v8@2.1.9
+
+## One-time fixes needed before `lint` goes green (files owned by other agents)
+# 1. Run `npx prettier --write .` once and commit. As of this writing ~35 existing files
+#    (src/**, supabase/functions/_shared/**, tests/unit, tsconfig.json, docs/SPEC.md) are not Prettier-formatted.
+# 2. `npx eslint . --fix` fixes the remaining two findings:
+#    - supabase/functions/_shared/domain/time.ts:26  prefer-const (`let offset` -> `const offset`)
+#    - src/lib/supabase.ts:7  unused `eslint-disable-next-line no-console` (console.warn is allowed)

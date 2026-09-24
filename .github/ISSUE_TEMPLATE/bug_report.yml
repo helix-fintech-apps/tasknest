@@ -1,0 +1,54 @@
+name: Bug report
+description: Something behaves differently from the spec or published terms.
+labels: [bug, triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the booking id / request id if you have one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as ava@tasknest.test
+        2. Book tara@tasknest.test for 60 min
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Booking / scheduling
+        - Payments / refunds / tips
+        - Points
+        - Payouts
+        - Tasker dashboard
+        - Admin / support console
+        - Auth / accounts
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: env
+    attributes:
+      label: Environment
+      options: [local, preview, staging]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      render: shell

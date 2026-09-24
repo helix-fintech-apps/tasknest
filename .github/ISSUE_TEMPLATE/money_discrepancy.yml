@@ -1,0 +1,53 @@
+name: Money discrepancy
+description: An amount, balance, refund, points total or ledger entry is wrong.
+title: "[money] "
+labels: [bug, money, priority-high]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Money bugs are triaged first. Give exact integer cents and the ids involved.
+        Never paste real card data or live Stripe keys.
+  - type: input
+    id: booking
+    attributes:
+      label: Booking id(s)
+    validations:
+      required: true
+  - type: textarea
+    id: amounts
+    attributes:
+      label: Expected vs actual (in cents)
+      placeholder: |
+        Refund on client cancel 30h before start
+        expected: 2587 (50% of 5175)
+        actual:   2588
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      multiple: true
+      options:
+        - Quote / total
+        - Tender allocation (card/points/wallet/promo)
+        - Cancellation refund
+        - Refund (support/admin)
+        - Tip
+        - Points earn/redeem/expiry
+        - Tasker payout / clawback
+        - Dispute
+        - Ledger imbalance
+    validations:
+      required: true
+  - type: input
+    id: policy
+    attributes:
+      label: Policy version of the booking
+      placeholder: "1"
+  - type: textarea
+    id: rule
+    attributes:
+      label: Which published rule is violated?
+      description: Quote the Pricing & policies page or docs/SPEC.md.

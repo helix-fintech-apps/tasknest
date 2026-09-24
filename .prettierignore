@@ -1,0 +1,18 @@
+# Build and test output
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Dependencies and lockfiles
+node_modules/
+package-lock.json
+
+# Supabase CLI state and generated files
+supabase/.temp/
+supabase/.branches/
+supabase/migrations/
+**/*.sql
+
+# Vercel
+.vercel/
