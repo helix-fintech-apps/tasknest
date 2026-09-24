@@ -652,9 +652,10 @@ describe.skipIf(!LIVE)("TaskNest API money flows (fake provider)", () => {
         const blocked = await quoteAt(500);
         expect(blocked.status).toBe(422);
         expect(blocked.body.error.message).toMatch(/not enough available points/);
-        // The 103 points came out of the booking's own earn lot first and the rest became a negative
-        // "debt" lot. (If Ben already carried debt from an earlier run, spending his net balance left the
-        // earn lot untouched, so all 103 come from it.)
+        // The 103 points came out of the booking's own earn lot first (whatever was left in it) and the
+        // rest became a negative "debt" lot. On a fresh database the spend above took the earn lot too, so
+        // everything is debt; with debt from an earlier run the earn lot was untouched and covers it all.
+        // Count the clawback movements themselves, so the check holds either way.
         const lotsOf = (kind: string) =>
           rest(
             "admin",
@@ -663,9 +664,17 @@ describe.skipIf(!LIVE)("TaskNest API money flows (fake provider)", () => {
           );
         const [earnLot] = await lotsOf("earn");
         const debtLots = await lotsOf("debt");
-        const fromLot = 103 - Number(earnLot.points_remaining);
+        const claws = await rest(
+          "admin",
+          "points_movements",
+          `user_id=eq.${USERS.ben.id}&booking_id=eq.${earnedOn}&kind=eq.clawback`,
+        );
+        const fromLot = claws
+          .filter((m: Json) => m.lot_id === earnLot.id)
+          .reduce((a: number, m: Json) => a - Number(m.points), 0);
         const debt = debtLots.reduce((a: number, l: Json) => a - Number(l.points_remaining), 0);
         expect(fromLot + debt).toBe(103);
+        expect(claws.reduce((a: number, m: Json) => a - Number(m.points), 0)).toBe(103);
         expect(refund.body.refund.pointsDebt).toBe(debt);
       } finally {
         // cleanup: cancel the big booking (>48h before start: reserved points released)
