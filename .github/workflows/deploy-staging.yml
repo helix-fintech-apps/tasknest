@@ -1,7 +1,8 @@
 name: Deploy staging
 
 # Every push to main (i.e. every merged PR) ships to staging:
-#   1. Supabase: link project -> db push (migrations) -> set function secrets -> deploy `api`
+#   1. Supabase: link project -> db push (migrations) -> set function secrets -> deploy `api` and
+#      `stripe-webhook` (no JWT: Stripe authenticates with its signature)
 #   2. Vercel:   vercel pull -> vercel build -> vercel deploy --prebuilt
 # Each half skips with a notice (and a green run) when its secrets are not configured yet.
 
@@ -87,17 +88,24 @@ jobs:
       - name: Deploy Edge Function `api`
         if: steps.check.outputs.ok == 'true'
         run: supabase functions deploy api --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Deploy Edge Function `stripe-webhook` (no JWT, Stripe-Signature auth)
+        if: steps.check.outputs.ok == 'true'
+        # Stripe sends no Supabase JWT, so the gateway must not require one; the function verifies
+        # the Stripe-Signature header with STRIPE_WEBHOOK_SECRET instead.
+        run: supabase functions deploy stripe-webhook --no-verify-jwt --project-ref "$SUPABASE_PROJECT_REF"
 
       - name: Summary
         id: urls
         if: steps.check.outputs.ok == 'true'
         run: |
           api="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/api"
+          webhook="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/stripe-webhook"
           echo "api_url=$api" >> "$GITHUB_OUTPUT"
           {
             echo "### Supabase staging"
             echo "- Migrations pushed to \`${SUPABASE_PROJECT_REF}\`"
             echo "- Edge Function \`api\` deployed: $api"
+            echo "- Edge Function \`stripe-webhook\` deployed (Stripe webhook endpoint): $webhook"
             echo "- Commit: \`${GITHUB_SHA::7}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

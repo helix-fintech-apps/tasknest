@@ -25,7 +25,7 @@ flowchart LR
 
   subgraph Staging["Deploy staging (push to main)"]
     direction TB
-    sb["Supabase<br/>link, db push,<br/>secrets set, functions deploy api"]
+    sb["Supabase<br/>link, db push, secrets set,<br/>functions deploy api + stripe-webhook"]
     vercel["Vercel<br/>pull, build, deploy --prebuilt"]
     sb --> vercel
   end
@@ -39,14 +39,14 @@ flowchart LR
 
 ## Workflows
 
-| File                                   | Trigger                                               | What it does                                                                                                                                             |
-| -------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`             | `pull_request`, push to `main`, `merge_group`, manual | The seven required jobs: `lint`, `typecheck`, `unit`, `db`, `api`, `e2e`, `build`                                                                        |
-| `.github/workflows/codeql.yml`         | PR, push to `main`, `merge_group`, weekly             | CodeQL `javascript-typescript` + `actions`, `security-extended` queries                                                                                  |
-| `.github/workflows/preview.yml`        | PR opened/updated                                     | Vercel preview deploy, sticky PR comment with the URL. Skips (green) without secrets                                                                     |
-| `.github/workflows/deploy-staging.yml` | push to `main`, manual                                | Supabase migrations + `api` function, then Vercel. Environment `staging`. Each half skips with a notice if its secrets are missing                       |
-| `.github/workflows/release.yml`        | tag `v*`                                              | GitHub release with generated notes (categories in `.github/release.yml`) plus the list of migrations in the release. `v1.2.3-rc.1` becomes a prerelease |
-| `.github/dependabot.yml`               | weekly (Mon)                                          | npm (dev tooling and runtime grouped, minor/patch) and GitHub Actions (grouped)                                                                          |
+| File                                   | Trigger                                               | What it does                                                                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.github/workflows/ci.yml`             | `pull_request`, push to `main`, `merge_group`, manual | The seven required jobs: `lint`, `typecheck`, `unit`, `db`, `api`, `e2e`, `build`                                                                            |
+| `.github/workflows/codeql.yml`         | PR, push to `main`, `merge_group`, weekly             | CodeQL `javascript-typescript` + `actions`, `security-extended` queries                                                                                      |
+| `.github/workflows/preview.yml`        | PR opened/updated                                     | Vercel preview deploy, sticky PR comment with the URL. Skips (green) without secrets                                                                         |
+| `.github/workflows/deploy-staging.yml` | push to `main`, manual                                | Supabase migrations + the `api` and `stripe-webhook` functions, then Vercel. Environment `staging`. Each half skips with a notice if its secrets are missing |
+| `.github/workflows/release.yml`        | tag `v*`                                              | GitHub release with generated notes (categories in `.github/release.yml`) plus the list of migrations in the release. `v1.2.3-rc.1` becomes a prerelease     |
+| `.github/dependabot.yml`               | weekly (Mon)                                          | npm (dev tooling and runtime grouped, minor/patch) and GitHub Actions (grouped)                                                                              |
 
 Shared plumbing:
 
@@ -54,7 +54,7 @@ Shared plumbing:
 - `scripts/ci/supabase-env.sh`: turns `supabase status -o env` into `$GITHUB_ENV` (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `VITE_SUPABASE_*`, `API_BASE_URL`) and masks the keys. Locally: `eval "$(scripts/ci/supabase-env.sh)"`.
 - `scripts/ci/wait-for-http.sh`: waits for the Edge Function runtime before tests start.
 - `scripts/ci/ensure-supabase-config.sh`: fails fast if `supabase/config.toml` is missing.
-- `scripts/ci/check-live-keys.sh`: refuses to deploy with a `sk_live_` Stripe key.
+- `scripts/ci/check-live-keys.sh`: refuses to deploy with a `sk_live_` Stripe key. It never prints the key (only its `sk_test_`-style prefix) and masks it in the Actions log.
 - `scripts/ci/db_checks.sql`: database invariants (below).
 - `scripts/ci/coverage-summary.mjs`: coverage table in the job summary.
 
@@ -71,7 +71,7 @@ Shared plumbing:
 | Check       | Source        | Fails when                                                                                                                                                          |
 | ----------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lint`      | ci.yml        | ESLint error or any warning (`--max-warnings=0`), or a file not formatted by Prettier. Money rule: `parseFloat` and `toFixed` are banned in `supabase/functions/**` |
-| `typecheck` | ci.yml        | `tsc --noEmit` fails for app, domain, tests, e2e. `deno check` fails for `supabase/functions/api/index.ts` (once it exists)                                         |
+| `typecheck` | ci.yml        | `tsc --noEmit` fails for app, domain, tests, e2e. `deno check` fails for `supabase/functions/api/index.ts` or `supabase/functions/stripe-webhook/index.ts`          |
 | `unit`      | ci.yml        | Any Vitest test in `tests/unit` fails. Coverage (v8, scoped to `_shared/domain`) is uploaded as the `coverage-unit` artifact and summarized on the run page         |
 | `db`        | ci.yml        | Migrations don't replay cleanly on an empty DB, `supabase db lint` reports errors, or `db_checks.sql` fails                                                         |
 | `api`       | ci.yml        | Any test in `tests/api` fails against the local stack + served functions                                                                                            |
@@ -110,11 +110,13 @@ Set these under **Settings → Environments** (`staging`, `preview`) or as repos
 | `SUPABASE_PROJECT_REF`  | secret              | deploy-staging          | `pfqvqencsbxauafahezw`                                                                                                                |
 | `SUPABASE_DB_PASSWORD`  | secret              | deploy-staging          | Database password of the project (for `link` and `db push`)                                                                           |
 | `STRIPE_SECRET_KEY`     | secret              | deploy-staging          | Stripe **test** key `sk_test_...`. Pushed to the Edge Function as a Supabase secret. If absent, staging uses `PAYMENTS_PROVIDER=fake` |
-| `STRIPE_WEBHOOK_SECRET` | secret              | deploy-staging          | `whsec_...` of the staging webhook endpoint `https://pfqvqencsbxauafahezw.supabase.co/functions/v1/api/webhooks/stripe`               |
+| `STRIPE_WEBHOOK_SECRET` | secret              | deploy-staging          | `whsec_...` of the staging webhook endpoint `https://pfqvqencsbxauafahezw.supabase.co/functions/v1/stripe-webhook` (see below)        |
 | `VERCEL_TOKEN`          | secret              | preview, deploy-staging | Vercel account token                                                                                                                  |
 | `VERCEL_ORG_ID`         | secret              | preview, deploy-staging | From `.vercel/project.json` after `vercel link`                                                                                       |
 | `VERCEL_PROJECT_ID`     | secret              | preview, deploy-staging | From `.vercel/project.json` after `vercel link`                                                                                       |
 | `STAGING_DOMAIN`        | variable (optional) | deploy-staging          | Custom domain to alias each staging deploy to, for example `staging.tasknest.app`                                                     |
+
+**Stripe webhook endpoint.** Stripe must call the separate `stripe-webhook` function, `https://pfqvqencsbxauafahezw.supabase.co/functions/v1/stripe-webhook`, which `deploy-staging` deploys with `--no-verify-jwt` (Stripe sends no Supabase JWT; the function verifies the `Stripe-Signature` header with `STRIPE_WEBHOOK_SECRET`). Do not use `/functions/v1/api/webhooks/stripe`: the hosted `api` function requires a JWT, so Stripe's calls would be rejected with 401 before they reach it. Subscribe the endpoint to `charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`.
 
 The Vite app's own `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set in the **Vercel project** (Preview environment), not in GitHub. `vercel pull` fetches them at build time.
 

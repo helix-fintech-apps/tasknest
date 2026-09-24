@@ -55,7 +55,7 @@ jobs:
           deno-version: v2.x
       - name: deno check (Edge Functions)
         if: hashFiles('supabase/functions/api/index.ts') != ''
-        run: deno check supabase/functions/api/index.ts
+        run: deno check supabase/functions/api/index.ts supabase/functions/stripe-webhook/index.ts
 
   unit:
     name: unit
