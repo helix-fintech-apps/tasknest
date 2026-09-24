@@ -44,6 +44,7 @@ export function planRefund(req: RefundRequest, ctx: RefundContext, policy: Money
   }
   const refundable = partsTotal(ctx.paid) - partsTotal(ctx.alreadyRefunded);
   const amount = req.kind === "full" ? refundable : req.amountCents;
+  if (amount <= 0) throw new Error("nothing left to refund");
   if (amount > refundable) throw new Error(`refund exceeds refundable amount (${refundable})`);
 
   const requiresApproval = req.actor === "support_agent" && amount > policy.refunds.agentLimitCents;
