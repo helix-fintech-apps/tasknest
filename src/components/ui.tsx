@@ -9,7 +9,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
-import { ApiError, errorMessage, newIdempotencyKey } from "../lib/api";
+import { errorMessage, keepsIdempotencyKey, newIdempotencyKey } from "../lib/api";
 import { money } from "../lib/format";
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
@@ -281,8 +281,10 @@ export function useLoad<T>(
 }
 
 /**
- * Run a mutation with an Idempotency-Key. The same key is reused if the request fails with a
- * network/5xx error (so a retry can't double-charge) and rotated after success or a 4xx.
+ * Run a mutation with an Idempotency-Key. The same key is reused when the request may not have
+ * finished (network error, 5xx, `409 busy` / `request_in_progress`; the API client already retries
+ * busy responses a few times with that key), so a retry can't double-charge. The key is rotated after
+ * a success or any other 4xx, whose response the API stores and would replay for the old key.
  */
 export function useAction<A extends unknown[], R>(fn: (key: string, ...args: A) => Promise<R>) {
   const key = useRef(newIdempotencyKey());
@@ -298,8 +300,10 @@ export function useAction<A extends unknown[], R>(fn: (key: string, ...args: A) 
         key.current = newIdempotencyKey();
         return r;
       } catch (e) {
-        if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 409)
-          key.current = newIdempotencyKey();
+        // Keep the key when the request may not have finished (network, 5xx, 409 busy /
+        // request_in_progress), so the user's retry cannot run it twice. A final 4xx answer is stored
+        // by the API for that key, so the next attempt needs a new one.
+        if (!keepsIdempotencyKey(e)) key.current = newIdempotencyKey();
         setError(errorMessage(e));
         return undefined;
       } finally {

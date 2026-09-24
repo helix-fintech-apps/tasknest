@@ -26,7 +26,7 @@ import {
   type RefundPlan,
   type PointsLot,
 } from "@domain";
-import type { BookingRow, PointsLotRow, PromoCodeRow, TenderRow } from "./supabase";
+import type { BookingRow, DisputeRow, PointsLotRow, PromoCodeRow, TenderRow } from "./supabase";
 import { formatCents } from "@domain";
 
 export function toPromo(row: PromoCodeRow): PromoCode {
@@ -193,33 +193,81 @@ export function tipCap(subtotal: number, policy: MoneyPolicy): number {
   return applyBps(subtotal, policy.tips.capBpsOfSubtotal);
 }
 
-/** Returns a human message when the tip is not allowed, else null. */
+/** Sum of the tips already paid on a booking. */
+export function tippedCents(tips: { amount_cents: number }[]): number {
+  return tips.reduce((a, t) => a + Number(t.amount_cents), 0);
+}
+
+/** How much more can still be tipped: the cap applies to ALL tips on a booking together. */
+export function tipRoom(b: BookingRow, policy: MoneyPolicy, alreadyTippedCents: number): number {
+  return Math.max(0, tipCap(Number(b.subtotal_cents), policy) - alreadyTippedCents);
+}
+
+/**
+ * Returns a human message when the tip is not allowed, else null. Mirrors the API: the tip itself
+ * must pass validateTip, and so must the running total including the tips already paid on the booking.
+ */
 export function tipProblem(
   amountCents: number | null,
   b: BookingRow,
   policy: MoneyPolicy,
   now: Date,
+  alreadyTippedCents = 0,
 ): string | null {
   if (amountCents === null) return "Enter a dollar amount, e.g. 10 or 12.50";
+  const subtotal = Number(b.subtotal_cents);
+  const completedAt = b.completed_at ? new Date(b.completed_at) : null;
+  const cap = tipCap(subtotal, policy);
+  const capText = `${policy.tips.capBpsOfSubtotal / 100}% of the ${formatCents(subtotal)} task subtotal`;
   try {
-    validateTip(
-      amountCents,
-      "card",
-      Number(b.subtotal_cents),
-      b.completed_at ? new Date(b.completed_at) : null,
-      now,
-      policy,
-    );
+    validateTip(amountCents, "card", subtotal, completedAt, now, policy);
+    if (alreadyTippedCents > 0) {
+      validateTip(alreadyTippedCents + amountCents, "card", subtotal, completedAt, now, policy);
+    }
     return null;
   } catch (e) {
     const msg = (e as Error).message;
     if (msg.startsWith("tip exceeds cap")) {
-      const cap = tipCap(Number(b.subtotal_cents), policy);
-      return `Tip can't be more than ${formatCents(cap)} (${policy.tips.capBpsOfSubtotal / 100}% of the ${formatCents(Number(b.subtotal_cents))} task subtotal)`;
+      if (alreadyTippedCents <= 0) return `Tip can't be more than ${formatCents(cap)} (${capText})`;
+      const room = Math.max(0, cap - alreadyTippedCents);
+      return room === 0
+        ? `You've already tipped the maximum of ${formatCents(cap)} (${capText}) on this booking`
+        : `Tips on a booking can't total more than ${formatCents(cap)} (${capText}). You've tipped ${formatCents(alreadyTippedCents)}, so you can add up to ${formatCents(room)}`;
     }
     return msg.charAt(0).toUpperCase() + msg.slice(1);
   }
 }
+
+/**
+ * A booking's money figures INCLUDING the extras charged at completion (extra labor, its service fee
+ * and tax, and expenses passed through to the tasker). Same numbers as the API's `bookingFigures`
+ * (supabase/functions/_shared/figures.ts), which feed planRefund and disputeLost there.
+ */
+export function bookingFigures(b: BookingRow, policy: MoneyPolicy) {
+  const extraLabor = Number(b.extra_labor_cents ?? 0);
+  const commission = applyBps(Number(b.subtotal_cents), policy.taskerCommissionBps);
+  const extraCommission = applyBps(extraLabor, policy.taskerCommissionBps);
+  return {
+    subtotal: Number(b.subtotal_cents) + extraLabor + Number(b.expenses_cents ?? 0),
+    total: Number(b.total_cents) + Number(b.extra_cents ?? 0),
+    tax: Number(b.tax_cents) + Number(b.extra_tax_cents ?? 0),
+    commission: commission + extraCommission,
+  };
+}
+
+const OPEN_DISPUTE = new Set(["needs_response", "under_review"]);
+
+/** The open card dispute on a booking, if any (refunds are blocked while one is open). */
+export function openDispute(disputes: DisputeRow[]): DisputeRow | null {
+  return disputes.find((d) => OPEN_DISPUTE.has(d.status)) ?? null;
+}
+
+export const DISPUTE_LABEL: Record<DisputeRow["status"], string> = {
+  needs_response: "Card dispute opened",
+  under_review: "Card dispute under review",
+  won: "Card dispute closed: won",
+  lost: "Card dispute closed: lost (charge reversed)",
+};
 
 export function previewRefund(
   kind: RefundKind,
@@ -236,7 +284,8 @@ export function previewRefund(
   const paid = paidParts(tenders, false);
   const already = refundedParts(tenders);
   const refundable = partsTotal(paid) - partsTotal(already);
-  const subtotal = Number(b.subtotal_cents);
+  // Extras charged at completion are part of what can be refunded and of the tasker's share.
+  const f = bookingFigures(b, policy);
   try {
     const plan = planRefund(
       {
@@ -251,9 +300,9 @@ export function previewRefund(
         paid,
         alreadyRefunded: already,
         completedAt: b.completed_at ? new Date(b.completed_at) : null,
-        subtotal,
-        total: Number(b.total_cents),
-        taskerCommissionOnSubtotal: applyBps(subtotal, policy.taskerCommissionBps),
+        subtotal: f.subtotal,
+        total: f.total,
+        taskerCommissionOnSubtotal: f.commission,
         taskerPaidOut: false,
         disputeOpen,
       },

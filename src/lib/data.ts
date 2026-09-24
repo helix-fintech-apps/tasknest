@@ -8,8 +8,8 @@ import {
   type LedgerTxnRow,
   type PayoutRow,
   type PointsLotRow,
+  type DisputeRow,
   type PointsMovementRow,
-  type Profile,
   type PromoCodeRow,
   type RefundRow,
   type ReviewRow,
@@ -24,14 +24,28 @@ function check<T>(res: { data: T | null; error: { message: string } | null }): T
   return (res.data ?? ([] as unknown)) as T;
 }
 
+/**
+ * Public names from `display_names` (id, display_name): a tasker's full name, everyone else's first
+ * name only. RLS shows a row to the user themself, staff, anyone for active taskers, and the other
+ * party of a shared booking. `profiles` is private (own row and staff), so it is never used for names.
+ */
 export async function namesFor(ids: string[]): Promise<Map<string, string>> {
   const uniq = [...new Set(ids)].filter(Boolean);
   if (!uniq.length) return new Map();
-  const res = await supabase.from("profiles").select("id, full_name").in("id", uniq);
-  // Profiles may be hidden by RLS; callers fall back to a generic label.
+  const res = await supabase.from("display_names").select("id, display_name").in("id", uniq);
+  // Names hidden by RLS (or a read error) fall back to a generic label at the call site.
   if (res.error) return new Map();
-  return new Map((res.data as Pick<Profile, "id" | "full_name">[]).map((p) => [p.id, p.full_name]));
+  return new Map(
+    (res.data as { id: string; display_name: string }[])
+      .filter((r) => r.display_name?.trim())
+      .map((r) => [r.id, r.display_name.trim()]),
+  );
 }
+
+const TASKER_COLS =
+  "id, display_name, headline, category, hourly_rate_cents, status, kyc_verified_at, suspended_at, created_at";
+
+const taskerName = (r: TaskerRow) => r.display_name?.trim() || `${r.category} tasker`;
 
 export interface TaskerCard extends TaskerRow {
   name: string;
@@ -40,35 +54,17 @@ export interface TaskerCard extends TaskerRow {
 }
 
 export async function listTaskers(opts: { includeAll?: boolean } = {}): Promise<TaskerCard[]> {
-  let q = supabase
-    .from("taskers")
-    .select(
-      "id, headline, category, hourly_rate_cents, status, kyc_verified_at, suspended_at, created_at",
-    )
-    .order("category");
+  let q = supabase.from("taskers").select(TASKER_COLS).order("category");
   if (!opts.includeAll) q = q.eq("status", "active");
   const rows = check(await q) as TaskerRow[];
-  const names = await namesFor(rows.map((r) => r.id));
-  return rows.map((r) => ({
-    ...r,
-    name: names.get(r.id) || `${r.category} tasker`,
-    rating: null,
-    reviews: 0,
-  }));
+  return rows.map((r) => ({ ...r, name: taskerName(r), rating: null, reviews: 0 }));
 }
 
 export async function getTasker(id: string): Promise<TaskerCard | null> {
-  const res = await supabase
-    .from("taskers")
-    .select(
-      "id, headline, category, hourly_rate_cents, status, kyc_verified_at, suspended_at, created_at",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const res = await supabase.from("taskers").select(TASKER_COLS).eq("id", id).maybeSingle();
   const row = check(res) as TaskerRow | null;
   if (!row) return null;
-  const names = await namesFor([id]);
-  return { ...row, name: names.get(id) || `${row.category} tasker`, rating: null, reviews: 0 };
+  return { ...row, name: taskerName(row), rating: null, reviews: 0 };
 }
 
 export async function taskerReviews(taskerId: string): Promise<ReviewRow[]> {
@@ -92,13 +88,17 @@ export async function taskerReviews(taskerId: string): Promise<ReviewRow[]> {
 }
 
 const BOOKING_COLS =
-  "id, client_id, tasker_id, policy_version, status, description, location_tz, start_at, original_start_at, est_minutes, rate_cents, subtotal_cents, service_fee_cents, tax_cents, total_cents, extra_cents, points_reserved, points_earned, promo_code, created_at, accepted_at, completed_at, canceled_at";
+  "id, client_id, tasker_id, policy_version, status, description, location_tz, start_at, original_start_at, est_minutes, rate_cents, subtotal_cents, service_fee_cents, tax_cents, total_cents, extra_cents, extra_labor_cents, extra_service_fee_cents, extra_tax_cents, expenses_cents, points_reserved, points_earned, promo_code, created_at, accepted_at, completed_at, canceled_at";
+
+const DISPUTE_COLS = "id, booking_id, amount_cents, fee_cents, status, created_at, closed_at";
 
 export interface BookingBundle {
   booking: BookingRow;
   tenders: TenderRow[];
   refunds: RefundRow[];
   tips: TipRow[];
+  /** Card disputes (chargebacks). Readable by the booking's client and tasker, and staff. */
+  disputes: DisputeRow[];
   review: ReviewRow | null;
   clientName: string;
   taskerName: string;
@@ -107,7 +107,7 @@ export interface BookingBundle {
 export async function bundleBookings(bookings: BookingRow[]): Promise<BookingBundle[]> {
   const ids = bookings.map((b) => b.id);
   if (!ids.length) return [];
-  const [tenders, refunds, tips, reviews, names] = await Promise.all([
+  const [tenders, refunds, tips, reviews, disputes, names] = await Promise.all([
     supabase
       .from("booking_tenders")
       .select("booking_id, tender, amount_cents, refunded_cents, points")
@@ -130,6 +130,7 @@ export async function bundleBookings(bookings: BookingRow[]): Promise<BookingBun
       .select("booking_id, rating, body, created_at")
       .in("booking_id", ids)
       .then(check),
+    disputesFor(ids),
     namesFor(bookings.flatMap((b) => [b.client_id, b.tasker_id])),
   ]);
   return bookings.map((b) => ({
@@ -137,6 +138,7 @@ export async function bundleBookings(bookings: BookingRow[]): Promise<BookingBun
     tenders: (tenders as TenderRow[]).filter((t) => t.booking_id === b.id),
     refunds: (refunds as RefundRow[]).filter((t) => t.booking_id === b.id),
     tips: (tips as TipRow[]).filter((t) => t.booking_id === b.id),
+    disputes: disputes.filter((d) => d.booking_id === b.id),
     review: (reviews as ReviewRow[]).find((r) => r.booking_id === b.id) ?? null,
     clientName: names.get(b.client_id) || "Client",
     taskerName: names.get(b.tasker_id) || "Tasker",
@@ -277,14 +279,14 @@ export async function ledger(opts: { bookingId?: string; limit?: number }): Prom
   return txns.map((t) => ({ ...t, lines: lines.filter((l) => l.txn_id === t.id) }));
 }
 
-export async function disputesFor(
-  bookingIds: string[],
-): Promise<{ booking_id: string; status: string; amount_cents: number }[]> {
+/** Disputes on these bookings (empty when none are readable). */
+export async function disputesFor(bookingIds: string[]): Promise<DisputeRow[]> {
   if (!bookingIds.length) return [];
   const res = await supabase
     .from("disputes")
-    .select("booking_id, status, amount_cents")
-    .in("booking_id", bookingIds);
+    .select(DISPUTE_COLS)
+    .in("booking_id", bookingIds)
+    .order("created_at", { ascending: false });
   if (res.error) return [];
-  return res.data as { booking_id: string; status: string; amount_cents: number }[];
+  return (res.data ?? []) as DisputeRow[];
 }

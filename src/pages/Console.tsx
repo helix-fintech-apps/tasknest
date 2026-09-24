@@ -1,9 +1,14 @@
-import { useMemo, useState } from "react";
-import type { Actor, RefundKind } from "@domain";
-import { api } from "../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import type { Actor, RefundKind, TenderParts } from "@domain";
+import {
+  api,
+  ApiError,
+  errorMessage,
+  isRefundRequest,
+  type RefundPreviewResponse,
+} from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
-  disputesFor,
   ledger,
   listTaskers,
   searchBookings,
@@ -12,7 +17,7 @@ import {
 } from "../lib/data";
 import { fmtDateTime, fmtMinutes, money, parseDollars } from "../lib/format";
 import { usePolicies } from "../lib/policy";
-import { previewRefund, TENDER_LABEL } from "../lib/preview";
+import { openDispute, previewRefund, TENDER_LABEL } from "../lib/preview";
 import { supabase, type Profile } from "../lib/supabase";
 import {
   Badge,
@@ -31,7 +36,7 @@ import {
   useAction,
   useLoad,
 } from "../components/ui";
-import { TenderBreakdown } from "./MyBookings";
+import { DisputeNote, TenderBreakdown } from "./MyBookings";
 
 type Tab = "bookings" | "taskers" | "payouts" | "ledger";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -224,6 +229,73 @@ function BookingsTab({
   );
 }
 
+/** Server refund preview state: "ok" and "rejected" are the server's answer; "unavailable" falls back. */
+type ServerPreview =
+  | { state: "idle" | "loading" }
+  | { state: "ok"; data: RefundPreviewResponse }
+  | { state: "rejected"; error: string }
+  | { state: "unavailable"; error: string };
+
+/**
+ * `POST /bookings/:id/refund-preview`: the exact plan the refund would execute (including extras
+ * charged at completion, points and approvals). A 4xx rule violation is the server's final answer;
+ * anything else (network, 5xx, an API without the endpoint) makes the console fall back to the
+ * browser preview built from the same domain code.
+ */
+function useServerRefundPreview(
+  bookingId: string,
+  body: { kind: RefundKind; amountCents: number; approvedBy?: string } | null,
+  stateKey: string,
+): ServerPreview {
+  const [server, setServer] = useState<ServerPreview>({ state: "idle" });
+  const kind = body?.kind;
+  const amountCents = body?.amountCents;
+  const approvedBy = body?.approvedBy;
+  useEffect(() => {
+    if (!kind || amountCents === undefined) {
+      setServer({ state: "idle" });
+      return;
+    }
+    let alive = true;
+    setServer({ state: "loading" });
+    const t = setTimeout(() => {
+      api
+        .refundPreview(bookingId, {
+          kind,
+          amountCents,
+          // The plan does not depend on the reason text, but the domain requires one.
+          reason: "refund preview",
+          approvedBy,
+        })
+        .then((data) => {
+          if (!alive) return;
+          if (!data?.plan?.perTender) {
+            setServer({ state: "unavailable", error: "unexpected refund-preview response" });
+          } else setServer({ state: "ok", data });
+        })
+        .catch((e: unknown) => {
+          if (!alive) return;
+          const final =
+            e instanceof ApiError &&
+            e.status >= 400 &&
+            e.status < 500 &&
+            ![404, 405].includes(e.status) &&
+            !(e.status === 409 && e.code === "busy");
+          setServer(
+            final
+              ? { state: "rejected", error: errorMessage(e) }
+              : { state: "unavailable", error: errorMessage(e) },
+          );
+        });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [bookingId, kind, amountCents, approvedBy, stateKey]);
+  return server;
+}
+
 function BookingDetail({
   x,
   isAdmin,
@@ -240,7 +312,6 @@ function BookingDetail({
   const b = x.booking;
   const policies = usePolicies();
   const policy = policies.policyFor(b.policy_version);
-  const disputes = useLoad(() => disputesFor([b.id]), [b.id]);
   const admins = useLoad(async () => {
     const r = await supabase.from("profiles").select("id, full_name, role").eq("role", "admin");
     return (r.data ?? []) as Pick<Profile, "id" | "full_name" | "role">[];
@@ -250,11 +321,10 @@ function BookingDetail({
   const [reason, setReason] = useState("");
   const [approvedBy, setApprovedBy] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
-  const disputeOpen = (disputes.data ?? []).some(
-    (d) => d.status === "needs_response" || d.status === "under_review",
-  );
+  const disputeOpen = !!openDispute(x.disputes);
   const cents = kind === "full" ? 0 : (parseDollars(amount) ?? 0);
-  const pv = policy
+  // Browser preview (fallback): the domain planRefund with the booking's figures incl. extras.
+  const local = policy
     ? previewRefund(
         kind,
         cents,
@@ -268,7 +338,33 @@ function BookingDetail({
         new Date(),
       )
     : null;
-  const amt = kind === "full" ? (pv?.refundable ?? 0) : cents;
+  // Server preview (source of truth). Re-asked whenever the booking's refund state changes.
+  const stateKey = `${x.tenders.map((t) => `${t.tender}:${t.refunded_cents}`).join(",")}|${x.disputes.map((d) => d.status).join(",")}|${b.status}`;
+  const server = useServerRefundPreview(
+    b.id,
+    kind === "full" || cents > 0
+      ? { kind, amountCents: kind === "full" ? 0 : cents, approvedBy: approvedBy || undefined }
+      : null,
+    stateKey,
+  );
+  const refundable = server.state === "ok" ? server.data.refundableCents : (local?.refundable ?? 0);
+  const amt = kind === "full" ? refundable : cents;
+  const pv: {
+    source: "server" | "browser";
+    plan: {
+      perTender: TenderParts;
+      taskerClawbackCents: number;
+      platformCostCents: number;
+    } | null;
+    error: string | null;
+  } | null =
+    server.state === "ok"
+      ? { source: "server", plan: server.data.plan, error: null }
+      : server.state === "rejected"
+        ? { source: "server", plan: null, error: server.error }
+        : server.state === "unavailable" && local
+          ? { source: "browser", plan: local.plan, error: local.error }
+          : null;
   const overLimit = !!policy && actor === "support_agent" && amt > policy.refunds.agentLimitCents;
   const refund = useAction((key: string) =>
     api.refund(
@@ -301,6 +397,7 @@ function BookingDetail({
         <MoneyRow label="Extras (separate charge)" cents={Number(b.extra_cents)} />
       )}
       <TenderBreakdown b={x} />
+      <DisputeNote b={x} />
       {!!x.refunds.length && (
         <div className="mt-3 text-xs">
           <div className="font-semibold uppercase text-slate-500">Refunds</div>
@@ -312,11 +409,6 @@ function BookingDetail({
               <span className="tabular-nums">{money(r.amount_cents)}</span>
             </div>
           ))}
-        </div>
-      )}
-      {!!disputes.data?.length && (
-        <div className="mt-2 text-xs text-red-700">
-          Dispute: {disputes.data.map((d) => `${d.status} ${money(d.amount_cents)}`).join(", ")}
         </div>
       )}
       <Button
@@ -354,7 +446,7 @@ function BookingDetail({
             data-testid="console-refund-amount"
             inputMode="decimal"
             disabled={kind === "full"}
-            value={kind === "full" ? ((pv?.refundable ?? 0) / 100).toFixed(2) : amount}
+            value={kind === "full" ? money(refundable).replace(/^\$/, "") : amount}
             onChange={(e) => setAmount(e.target.value)}
           />
         </Field>
@@ -393,19 +485,39 @@ function BookingDetail({
           </Select>
         </Field>
       )}
+      {server.state === "loading" && amt > 0 && (
+        <p className="mb-2 text-xs text-slate-400" data-testid="console-refund-checking">
+          Checking the refund with the server…
+        </p>
+      )}
       {pv?.plan && amt > 0 && (
         <div
           className="mb-3 rounded-lg bg-slate-50 p-3 text-sm"
           data-testid="console-refund-preview"
+          data-source={pv.source}
         >
           {(["card", "wallet", "points", "promo"] as const)
             .filter((t) => pv.plan!.perTender[t] > 0)
             .map((t) => (
               <MoneyRow key={t} label={`To ${TENDER_LABEL[t]}`} cents={pv.plan!.perTender[t]} />
             ))}
-          <MoneyRow label="Tasker clawback" cents={pv.plan.taskerClawbackCents} />
-          <MoneyRow label="Platform cost" cents={pv.plan.platformCostCents} />
+          <MoneyRow
+            label="Tasker clawback"
+            cents={pv.plan.taskerClawbackCents}
+            testId="console-refund-clawback"
+          />
+          <MoneyRow
+            label="Platform cost"
+            cents={pv.plan.platformCostCents}
+            testId="console-refund-platform"
+          />
           <MoneyRow label="Refund total" cents={amt} strong />
+          {pv.source === "browser" && server.state === "unavailable" && (
+            <p className="mt-2 text-xs text-amber-700" data-testid="console-refund-fallback">
+              Server preview unavailable ({server.error}); computed in the browser with the same
+              rules. The server decides the final amounts.
+            </p>
+          )}
         </div>
       )}
       {pv?.error && amt > 0 && pv.error !== "refund reason is required" && (
@@ -416,10 +528,17 @@ function BookingDetail({
       {refund.error && <Banner tone="error">{refund.error}</Banner>}
       <Button
         data-testid="console-refund-submit"
-        disabled={refund.pending || !reason.trim() || amt <= 0 || !pv?.plan}
+        disabled={
+          refund.pending || server.state === "loading" || !reason.trim() || amt <= 0 || !pv?.plan
+        }
         onClick={async () => {
-          if (await refund.run()) {
-            setFlash(`Refunded ${money(amt)}.`);
+          const r = await refund.run();
+          if (r) {
+            setFlash(
+              isRefundRequest(r)
+                ? `Refund requested: ${money(r.amountCents)} (not refunded yet).`
+                : `Refunded ${money(r.refund.amountCents)}.`,
+            );
             setReason("");
             setAmount("");
             onChanged();
@@ -444,7 +563,6 @@ function BookingDetail({
                 if (await dispute.run("won")) {
                   setFlash("Dispute simulated: won.");
                   onChanged();
-                  disputes.reload();
                 }
               }}
             >
@@ -458,7 +576,6 @@ function BookingDetail({
                 if (await dispute.run("lost")) {
                   setFlash("Dispute simulated: lost.");
                   onChanged();
-                  disputes.reload();
                 }
               }}
             >

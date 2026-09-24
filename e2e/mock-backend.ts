@@ -2,7 +2,15 @@
 // without a live backend. Tests that need the real backend live in backend.spec.ts (E2E_BACKEND=1).
 
 import type { Page, Request, Route } from "@playwright/test";
-import { DEFAULT_POLICY } from "../supabase/functions/_shared/domain/config.ts";
+import {
+  applyBps,
+  DEFAULT_POLICY,
+  emptyParts,
+  partsTotal,
+  planRefund,
+  type MoneyPolicy,
+  type RefundKind,
+} from "../supabase/functions/_shared/domain/index.ts";
 
 export const PASSWORD = "TaskNest!2026";
 const H = 3_600_000;
@@ -22,6 +30,24 @@ export const IDS = {
   bDone: "10000000-0000-4000-8000-00000000d0e0",
   bReq: "10000000-0000-4000-8000-000000000e90",
   bProg: "10000000-0000-4000-8000-000000009e09",
+  bExtra: "10000000-0000-4000-8000-0000000e0e0a", // completed with extra time + expenses
+  bTipped: "10000000-0000-4000-8000-0000000719ed", // completed, $10 already tipped
+  bDisputed: "10000000-0000-4000-8000-00000000d15b", // completed, card dispute under review
+};
+
+/** A policy published for the future: it must never be the active one before 2099-12-31. */
+export const FUTURE_POLICY: MoneyPolicy = {
+  ...DEFAULT_POLICY,
+  version: 2,
+  clientServiceFeeBps: 2000,
+  cancellation: {
+    ...DEFAULT_POLICY.cancellation,
+    tiers: [
+      { minHoursBefore: 72, refundBps: 10_000 },
+      { minHoursBefore: 24, refundBps: 5_000 },
+      { minHoursBefore: 0, refundBps: 0, chargeMinutesOfRate: 60 },
+    ],
+  },
 };
 
 type Row = Record<string, unknown>;
@@ -125,6 +151,25 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
       client_id: IDS.ben,
       description: "Assemble desk",
     }),
+    // 2h at $45 + 30 extra minutes ($22.50 + $3.38 fee) + $12.50 expenses, charged separately.
+    booking(IDS.bExtra, "completed", now - 4 * 24 * H, {
+      completed_at: new Date(now - 4 * 24 * H + 3 * H).toISOString(),
+      description: "Hang shelves",
+      extra_cents: 3838,
+      extra_labor_cents: 2250,
+      extra_service_fee_cents: 338,
+      extra_tax_cents: 0,
+      expenses_cents: 1250,
+      points_earned: 141,
+    }),
+    booking(IDS.bTipped, "completed", now - 5 * 24 * H, {
+      completed_at: new Date(now - 5 * 24 * H + 2 * H).toISOString(),
+      description: "Patch drywall",
+    }),
+    booking(IDS.bDisputed, "disputed", now - 6 * 24 * H, {
+      completed_at: new Date(now - 6 * 24 * H + 2 * H).toISOString(),
+      description: "Fix door",
+    }),
   ];
   const tenders: Row[] = [
     { booking_id: IDS.b72, tender: "card", amount_cents: 10350, refunded_cents: 0, points: 0 },
@@ -135,7 +180,23 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
     { booking_id: IDS.bDone, tender: "card", amount_cents: 10350, refunded_cents: 0, points: 0 },
     { booking_id: IDS.bReq, tender: "card", amount_cents: 10350, refunded_cents: 0, points: 0 },
     { booking_id: IDS.bProg, tender: "card", amount_cents: 10350, refunded_cents: 0, points: 0 },
+    // The extras charge is added to the card tender at completion (10350 + 3838).
+    { booking_id: IDS.bExtra, tender: "card", amount_cents: 14188, refunded_cents: 0, points: 0 },
+    { booking_id: IDS.bTipped, tender: "card", amount_cents: 10350, refunded_cents: 0, points: 0 },
+    {
+      booking_id: IDS.bDisputed,
+      tender: "card",
+      amount_cents: 10350,
+      refunded_cents: 0,
+      points: 0,
+    },
   ];
+  // Public names (display_names): a tasker's full name, everyone else's first name only.
+  const displayNames: Row[] = profiles.map((p) => ({
+    id: p.id,
+    display_name:
+      p.role === "tasker" ? String(p.full_name) : String(p.full_name).split(" ")[0] || "",
+  }));
   const lot = (
     id: string,
     pts: number,
@@ -155,9 +216,11 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
   });
   return {
     profiles,
+    display_names: displayNames,
     taskers: [
       {
         id: IDS.tara,
+        display_name: "Tara Tasker",
         headline: "Mounting, repairs, furniture assembly",
         category: "Handyman",
         hourly_rate_cents: 4500,
@@ -167,6 +230,7 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
       },
       {
         id: IDS.leo,
+        display_name: "Leo Tasker",
         headline: "Deep cleaning and move-outs",
         category: "Cleaning",
         hourly_rate_cents: 3800,
@@ -176,6 +240,7 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
       },
       {
         id: IDS.pia,
+        display_name: "Pia Tasker",
         headline: "Moving help",
         category: "Moving",
         hourly_rate_cents: 6000,
@@ -190,11 +255,21 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
         policy: DEFAULT_POLICY,
         effective_from: new Date(now - 90 * 24 * H).toISOString(),
       },
+      // Published, but not in effect until 2099: the UI must keep using v1.
+      { version: 2, policy: FUTURE_POLICY, effective_from: "2099-12-31T00:00:00+00:00" },
     ],
     bookings,
     booking_tenders: tenders,
     refunds: [],
-    tips: [],
+    tips: [
+      {
+        id: "30000000-0000-4000-8000-000000000001",
+        booking_id: IDS.bTipped,
+        amount_cents: 1000,
+        platform_fee_cents: 0,
+        created_at: new Date(now - 4 * 24 * H).toISOString(),
+      },
+    ],
     reviews: [],
     points_lots: [
       lot("20000000-0000-4000-8000-000000000001", 1500, -60 * 24 * H, 200 * 24 * H),
@@ -242,7 +317,17 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
     promo_redemptions: [],
     payouts: [],
     tasker_strikes: [],
-    disputes: [],
+    disputes: [
+      {
+        id: "40000000-0000-4000-8000-000000000001",
+        booking_id: IDS.bDisputed,
+        amount_cents: 10350,
+        fee_cents: 0,
+        status: "under_review",
+        created_at: new Date(now - 2 * 24 * H).toISOString(),
+        closed_at: null,
+      },
+    ],
     ledger_txns: [],
     ledger_lines: [],
     tasker_balances: [{ tasker_id: IDS.tara, balance_cents: 7650 }],
@@ -328,15 +413,36 @@ export interface ApiCall {
   headers: Record<string, string>;
 }
 
+export interface RestCall {
+  table: string;
+  query: string;
+}
+
+/** Same figures as the API (supabase/functions/_shared/figures.ts): extras included. */
+function figures(b: Row, policy: MoneyPolicy) {
+  const n = (k: string) => Number(b[k] ?? 0);
+  return {
+    subtotal: n("subtotal_cents") + n("extra_labor_cents") + n("expenses_cents"),
+    total: n("total_cents") + n("extra_cents"),
+    commission:
+      applyBps(n("subtotal_cents"), policy.taskerCommissionBps) +
+      applyBps(n("extra_labor_cents"), policy.taskerCommissionBps),
+  };
+}
+
+class RuleError extends Error {}
+
 export interface MockBackend {
   db: Record<string, Row[]>;
   apiCalls: ApiCall[];
+  restCalls: RestCall[];
   /** Override a response for an api path (regex on the path after /functions/v1/api). */
   onApi: (re: RegExp, handler: (call: ApiCall) => { status?: number; body: unknown }) => void;
 }
 
 export async function mockBackend(page: Page, db = makeDb()): Promise<MockBackend> {
   const apiCalls: ApiCall[] = [];
+  const restCalls: RestCall[] = [];
   const handlers: { re: RegExp; handler: (c: ApiCall) => { status?: number; body: unknown } }[] =
     [];
   let currentUser: Row | null = null;
@@ -395,6 +501,7 @@ export async function mockBackend(page: Page, db = makeDb()): Promise<MockBacken
     if (req.method() === "OPTIONS") return cors(route);
     const url = new URL(req.url());
     const table = url.pathname.split("/rest/v1/")[1];
+    restCalls.push({ table, query: url.search });
     const rows = applyFilters(db[table] ?? [], url.searchParams);
     const single = (req.headers()["accept"] ?? "").includes("vnd.pgrst.object");
     if (single) {
@@ -416,6 +523,50 @@ export async function mockBackend(page: Page, db = makeDb()): Promise<MockBacken
     });
   });
 
+  // Refund planning exactly like the API: the domain planRefund with the booking's figures incl. extras.
+  const refundPlan = (b: Row, body: Record<string, unknown>) => {
+    const policy = DEFAULT_POLICY;
+    const paid = emptyParts();
+    const refunded = emptyParts();
+    for (const t of db.booking_tenders.filter((x) => x.booking_id === b.id)) {
+      paid[t.tender as keyof typeof paid] = Number(t.amount_cents);
+      refunded[t.tender as keyof typeof refunded] = Number(t.refunded_cents);
+    }
+    const refundable = partsTotal(paid) - partsTotal(refunded);
+    const approvedBy = typeof body.approvedBy === "string" ? body.approvedBy : undefined;
+    if (approvedBy && db.profiles.find((p) => p.id === approvedBy)?.role !== "admin")
+      throw new RuleError("approvedBy must be an admin");
+    const kind = body.kind as RefundKind;
+    const amountCents =
+      kind === "full" && !body.amountCents ? Math.max(refundable, 1) : Number(body.amountCents);
+    const f = figures(b, policy);
+    const disputeOpen = db.disputes.some(
+      (d) => d.booking_id === b.id && ["needs_response", "under_review"].includes(String(d.status)),
+    );
+    const plan = planRefund(
+      {
+        kind,
+        amountCents,
+        actor: (currentUser?.role as "admin" | "support_agent") ?? "admin",
+        approvedBy,
+        reason: String(body.reason ?? ""),
+        requestedAt: new Date(),
+      },
+      {
+        paid,
+        alreadyRefunded: refunded,
+        completedAt: b.completed_at ? new Date(String(b.completed_at)) : null,
+        subtotal: f.subtotal,
+        total: f.total,
+        taskerCommissionOnSubtotal: f.commission,
+        taskerPaidOut: false,
+        disputeOpen,
+      },
+      policy,
+    );
+    return { refundable, plan };
+  };
+
   await page.route("**/functions/v1/api/**", async (route: Route, req: Request) => {
     if (req.method() === "OPTIONS") return cors(route);
     const path = new URL(req.url()).pathname.split("/functions/v1/api")[1];
@@ -434,6 +585,102 @@ export async function mockBackend(page: Page, db = makeDb()): Promise<MockBacken
     if (path === "/quote")
       return json(route, 503, { error: { code: "unavailable", message: "mock: no server quote" } });
     const m = /^\/bookings\/([^/]+)\/(\w[\w-]*)$/.exec(path);
+    const body = (call.body ?? {}) as Record<string, unknown>;
+    const rule = (e: unknown) =>
+      json(route, 422, { error: { code: "rule_violation", message: (e as Error).message } });
+    if (m && (m[2] === "refund-preview" || m[2] === "refund")) {
+      const b = db.bookings.find((x) => x.id === m[1]);
+      if (!b)
+        return json(route, 404, { error: { code: "not_found", message: "booking not found" } });
+      const role = String(currentUser?.role ?? "");
+      if (m[2] === "refund-preview" && !["admin", "support_agent"].includes(role))
+        return json(route, 404, { error: { code: "not_found", message: "booking not found" } });
+      if (m[2] === "refund" && role === "client") {
+        // A client's refund is only a request for support (202).
+        return json(route, 202, {
+          requested: true,
+          bookingId: b.id,
+          kind: body.kind,
+          amountCents: body.amountCents,
+        });
+      }
+      try {
+        const { refundable, plan } = refundPlan(b, {
+          ...body,
+          reason: m[2] === "refund-preview" ? body.reason || "preview" : body.reason,
+        });
+        const amountCents = partsTotal(plan.perTender);
+        if (m[2] === "refund-preview") {
+          return json(route, 200, {
+            refundableCents: refundable,
+            plan: { ...plan, amountCents },
+            pointsReturned: plan.perTender.points,
+            pointsClawedBack: 0,
+            policyVersion: 1,
+          });
+        }
+        for (const t of db.booking_tenders.filter((x) => x.booking_id === b.id))
+          t.refunded_cents =
+            Number(t.refunded_cents) + plan.perTender[t.tender as keyof typeof plan.perTender];
+        const id = `50000000-0000-4000-8000-${String(db.refunds.length + 1).padStart(12, "0")}`;
+        db.refunds.push({
+          id,
+          booking_id: b.id,
+          kind: body.kind,
+          amount_cents: amountCents,
+          per_tender: plan.perTender,
+          tasker_clawback_cents: plan.taskerClawbackCents,
+          actor_role: role,
+          reason: body.reason,
+          created_at: new Date().toISOString(),
+        });
+        return json(route, 200, {
+          refund: {
+            id,
+            kind: body.kind,
+            amountCents,
+            perTender: plan.perTender,
+            taskerClawbackCents: plan.taskerClawbackCents,
+            platformCostCents: plan.platformCostCents,
+            requiresApproval: plan.requiresApproval,
+            approvedBy: body.approvedBy ?? null,
+            pointsReturned: plan.perTender.points,
+            pointsClawedBack: 0,
+            pointsDebt: 0,
+            providerRefundIds: ["re_fake_mock"],
+          },
+          booking: b,
+        });
+      } catch (e) {
+        return rule(e);
+      }
+    }
+    if (m && m[2] === "tip") {
+      const b = db.bookings.find((x) => x.id === m[1]);
+      const amountCents = Number(body.amountCents);
+      const before = db.tips
+        .filter((t) => t.booking_id === m[1])
+        .reduce((a, t) => a + Number(t.amount_cents), 0);
+      const id = `30000000-0000-4000-8000-${String(db.tips.length + 1).padStart(12, "0")}`;
+      db.tips.push({
+        id,
+        booking_id: m[1],
+        amount_cents: amountCents,
+        platform_fee_cents: 0,
+        created_at: new Date().toISOString(),
+      });
+      return json(route, 200, {
+        tip: {
+          id,
+          amountCents,
+          taskerGets: amountCents,
+          platformFee: 0,
+          paymentIntentId: "pi_fake_tip",
+          tippedTotalCents: before + amountCents,
+        },
+        booking: b,
+      });
+    }
     if (m) {
       const b = db.bookings.find((x) => x.id === m[1]);
       const next: Record<string, string> = {
@@ -453,7 +700,7 @@ export async function mockBackend(page: Page, db = makeDb()): Promise<MockBacken
     return json(route, 200, { ok: true });
   });
 
-  return { db, apiCalls, onApi: (re, handler) => handlers.push({ re, handler }) };
+  return { db, apiCalls, restCalls, onApi: (re, handler) => handlers.push({ re, handler }) };
 }
 
 export async function signIn(page: Page, email: string) {

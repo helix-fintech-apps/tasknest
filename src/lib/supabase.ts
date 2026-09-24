@@ -24,6 +24,8 @@ export interface Profile {
 }
 export interface TaskerRow {
   id: string;
+  /** Public name, kept in sync with the tasker's profile by the database. */
+  display_name?: string;
   headline: string;
   category: string;
   hourly_rate_cents: number;
@@ -48,7 +50,12 @@ export interface BookingRow {
   service_fee_cents: number;
   tax_cents: number;
   total_cents: number;
+  /** Everything charged at completion: extra labor + its service fee + its tax + expenses. */
   extra_cents: number;
+  extra_labor_cents?: number;
+  extra_service_fee_cents?: number;
+  extra_tax_cents?: number;
+  expenses_cents?: number;
   points_reserved: number;
   points_earned: number;
   promo_code: string | null;
@@ -81,6 +88,16 @@ export interface TipRow {
   amount_cents: number;
   platform_fee_cents: number;
   created_at: string;
+}
+export type DisputeStatus = "needs_response" | "under_review" | "won" | "lost";
+export interface DisputeRow {
+  id: string;
+  booking_id: string;
+  amount_cents: number;
+  fee_cents: number;
+  status: DisputeStatus;
+  created_at: string;
+  closed_at: string | null;
 }
 export interface ReviewRow {
   booking_id: string;

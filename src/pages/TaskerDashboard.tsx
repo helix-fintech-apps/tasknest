@@ -30,7 +30,7 @@ import {
   useAction,
   useLoad,
 } from "../components/ui";
-import { RescheduleDialog, TenderBreakdown } from "./MyBookings";
+import { DisputeNote, RescheduleDialog, TenderBreakdown } from "./MyBookings";
 
 type Dialog = { kind: "complete" | "cancel" | "reschedule"; x: BookingBundle } | null;
 
@@ -240,11 +240,12 @@ export default function TaskerDashboard() {
                   </thead>
                   <tbody>
                     {history.map((x) => (
-                      <tr key={x.booking.id}>
+                      <tr key={x.booking.id} data-booking-id={x.booking.id}>
                         <td>{fmtDate(x.booking.start_at)}</td>
                         <td>{x.clientName}</td>
                         <td>
                           <Badge value={x.booking.status} />
+                          <DisputeNote b={x} />
                         </td>
                         <td className="text-right tabular-nums">
                           {money(x.booking.subtotal_cents)}
@@ -362,6 +363,7 @@ function JobCard({ x, children }: { x: BookingBundle; children: React.ReactNode 
           </div>
           {b.description && <div className="mt-1 text-sm text-slate-500">{b.description}</div>}
           <TenderBreakdown b={x} />
+          <DisputeNote b={x} />
         </div>
         <div className="text-right">
           <div className="text-lg font-semibold tabular-nums">{money(b.subtotal_cents)}</div>

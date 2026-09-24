@@ -231,3 +231,214 @@ test.describe("console", () => {
     await expect(page.getByTestId("console-refund-submit")).toBeEnabled();
   });
 });
+
+test.describe("names come from display_names", () => {
+  test("clients see tasker names, taskers see a client's first name only", async ({ page }) => {
+    const mock = await mockBackend(page);
+    await signIn(page, "ava@tasknest.test");
+    await expect(page.getByTestId("tasker-card-tara")).toContainText("Tara Tasker");
+    await page.getByTestId("nav-bookings").click();
+    await expect(
+      page.locator(`[data-testid=booking-card][data-booking-id="${IDS.b72}"]`),
+    ).toContainText("Tara Tasker");
+    // Other people's names are read from display_names; profiles is only read for the user's own row.
+    expect(mock.restCalls.some((c) => c.table === "display_names")).toBe(true);
+    const profileReads = mock.restCalls.filter((c) => c.table === "profiles");
+    expect(profileReads.length).toBeGreaterThan(0);
+    for (const c of profileReads) expect(c.query).toContain(`id=eq.${IDS.ava}`);
+
+    await page.getByTestId("sign-out").click();
+    await signIn(page, "tara@tasknest.test");
+    const job = page.locator(`[data-testid=job-card][data-booking-id="${IDS.bReq}"]`);
+    await expect(job).toContainText("Ben");
+    await expect(job).not.toContainText("Ben Client");
+  });
+});
+
+test.describe("tips across a booking", () => {
+  test("the tip cap counts the tips already paid on the booking", async ({ page }) => {
+    const mock = await mockBackend(page);
+    await signIn(page, "ava@tasknest.test");
+    await page.getByTestId("nav-bookings").click();
+    await page
+      .locator(`[data-testid=booking-card][data-booking-id="${IDS.bTipped}"]`)
+      .getByTestId("tip-open")
+      .click();
+    await expect(page.getByTestId("tip-room")).toContainText("You've tipped $10.00");
+    await expect(page.getByTestId("tip-room")).toContainText("up to $12.50 more");
+    await page.getByTestId("tip-input").fill("15");
+    await expect(page.getByTestId("tip-error")).toContainText("can't total more than $22.50");
+    await expect(page.getByTestId("tip-error")).toContainText("you can add up to $12.50");
+    await expect(page.getByTestId("tip-confirm")).toBeDisabled();
+    await page.getByTestId("tip-input").fill("12.50");
+    await expect(page.getByTestId("tip-error")).toHaveCount(0);
+    await page.getByTestId("tip-confirm").click();
+    await expect(page.getByTestId("flash")).toContainText("$12.50");
+    expect(mock.apiCalls.find((c) => c.path === `/bookings/${IDS.bTipped}/tip`)?.body).toEqual({
+      amountCents: 1250,
+    });
+  });
+});
+
+test.describe("refund preview for a booking with extras", () => {
+  const row = (page: import("@playwright/test").Page, id: string) =>
+    page.locator(`[data-testid=console-booking-row][data-booking-id="${id}"]`);
+
+  test("the console shows the server's refund-preview, which counts the extras", async ({
+    page,
+  }) => {
+    const mock = await mockBackend(page);
+    await signIn(page, "admin@tasknest.test");
+    await row(page, IDS.bExtra).click();
+    await page.getByTestId("console-refund-amount").fill("70");
+    await page.getByTestId("console-refund-reason").fill("Shelf fell down");
+    await expect(page.getByTestId("console-refund-preview")).toHaveAttribute(
+      "data-source",
+      "server",
+    );
+    // Tasker share of $141.88 paid = ($90 + $22.50 extra labor + $12.50 expenses - $16.88 commission).
+    await expect(page.getByTestId("console-refund-clawback")).toHaveText("$53.34");
+    await expect(page.getByTestId("console-refund-platform")).toHaveText("$16.66");
+    expect(
+      mock.apiCalls.some((c) => c.path === `/bookings/${IDS.bExtra}/refund-preview`),
+    ).toBeTruthy();
+    await page.getByTestId("console-refund-kind").selectOption("full");
+    await expect(page.getByTestId("console-refund-amount")).toHaveValue("141.88");
+    await expect(page.getByTestId("console-refund-preview")).toContainText("$141.88");
+    await page.getByTestId("console-refund-kind").selectOption("partial");
+    await page.getByTestId("console-refund-amount").fill("70");
+    await expect(page.getByTestId("console-refund-clawback")).toHaveText("$53.34");
+    await page.getByTestId("console-refund-submit").click();
+    await expect(page.getByTestId("refund-flash")).toContainText("Refunded $70.00");
+  });
+
+  test("falls back to the browser preview, extras included, when the endpoint is down", async ({
+    page,
+  }) => {
+    const mock = await mockBackend(page);
+    mock.onApi(/\/refund-preview$/, () => ({
+      status: 503,
+      body: { error: { code: "unavailable", message: "preview down" } },
+    }));
+    await signIn(page, "admin@tasknest.test");
+    await row(page, IDS.bExtra).click();
+    await page.getByTestId("console-refund-amount").fill("70");
+    await page.getByTestId("console-refund-reason").fill("Shelf fell down");
+    await expect(page.getByTestId("console-refund-preview")).toHaveAttribute(
+      "data-source",
+      "browser",
+    );
+    await expect(page.getByTestId("console-refund-fallback")).toContainText("preview down");
+    await expect(page.getByTestId("console-refund-clawback")).toHaveText("$53.34");
+  });
+});
+
+test.describe("idempotency keys and refund requests", () => {
+  test("409 busy is retried with the same Idempotency-Key", async ({ page }) => {
+    const mock = await mockBackend(page);
+    let n = 0;
+    mock.onApi(/^\/bookings\/[^/]+\/cancel$/, () =>
+      ++n === 1
+        ? {
+            status: 409,
+            body: { error: { code: "busy", message: "another request is updating this booking" } },
+          }
+        : { status: 200, body: { booking: { id: IDS.b72, status: "canceled_client" } } },
+    );
+    await signIn(page, "ava@tasknest.test");
+    await page.getByTestId("nav-bookings").click();
+    await page
+      .locator(`[data-testid=booking-card][data-booking-id="${IDS.b72}"]`)
+      .getByTestId("cancel-open")
+      .click();
+    await page.getByTestId("cancel-confirm").click();
+    await expect(page.getByTestId("flash")).toContainText("Booking canceled");
+    const calls = mock.apiCalls.filter((c) => c.path === `/bookings/${IDS.b72}/cancel`);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].headers["idempotency-key"]).toBeTruthy();
+    expect(calls[1].headers["idempotency-key"]).toBe(calls[0].headers["idempotency-key"]);
+  });
+
+  test("a final 4xx answer starts a new Idempotency-Key for the next attempt", async ({ page }) => {
+    const mock = await mockBackend(page);
+    let n = 0;
+    mock.onApi(/^\/bookings\/[^/]+\/reschedule$/, () =>
+      ++n === 1
+        ? {
+            status: 409,
+            body: { error: { code: "slot_taken", message: "tasker already has a booking" } },
+          }
+        : { status: 200, body: { booking: { id: IDS.b72, status: "accepted" } } },
+    );
+    await signIn(page, "ava@tasknest.test");
+    await page.getByTestId("nav-bookings").click();
+    await page
+      .locator(`[data-testid=booking-card][data-booking-id="${IDS.b72}"]`)
+      .getByTestId("reschedule-open")
+      .click();
+    await page.getByTestId("reschedule-confirm").click();
+    await expect(page.getByTestId("reschedule-error")).toContainText("already has a booking");
+    await page.getByTestId("reschedule-confirm").click();
+    await expect(page.getByTestId("flash")).toContainText("rescheduled");
+    const calls = mock.apiCalls.filter((c) => c.path === `/bookings/${IDS.b72}/reschedule`);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].headers["idempotency-key"]).not.toBe(calls[0].headers["idempotency-key"]);
+  });
+
+  test("a client's refund is shown as requested, not as refunded", async ({ page }) => {
+    const mock = await mockBackend(page);
+    await signIn(page, "ava@tasknest.test");
+    await page.getByTestId("nav-bookings").click();
+    const card = page.locator(`[data-testid=booking-card][data-booking-id="${IDS.bDone}"]`);
+    await card.getByTestId("refund-open").click();
+    await page.getByTestId("refund-amount").fill("20");
+    await page.getByTestId("refund-reason").fill("Left a mess");
+    await page.getByTestId("refund-submit").click();
+    await expect(page.getByTestId("flash")).toContainText("Refund requested: $20.00");
+    await expect(page.getByTestId("flash")).toContainText("nothing has been refunded yet");
+    expect(
+      mock.apiCalls.find((c) => c.path === `/bookings/${IDS.bDone}/refund`)?.body,
+    ).toMatchObject({ kind: "partial", amountCents: 2000 });
+    await expect(card).not.toContainText("refunded");
+  });
+});
+
+test.describe("disputes", () => {
+  test("the client and the tasker see the dispute status on the booking", async ({ page }) => {
+    await mockBackend(page);
+    await signIn(page, "ava@tasknest.test");
+    await page.getByTestId("nav-bookings").click();
+    const card = page.locator(`[data-testid=booking-card][data-booking-id="${IDS.bDisputed}"]`);
+    await expect(card.getByTestId("booking-dispute")).toHaveText(
+      "Card dispute under review · $103.50",
+    );
+    await expect(card.getByTestId("booking-dispute")).toHaveAttribute(
+      "data-dispute-status",
+      "under_review",
+    );
+    await expect(card.getByTestId("refund-open")).toHaveCount(0);
+    await page.getByTestId("sign-out").click();
+    await signIn(page, "tara@tasknest.test");
+    await expect(
+      page
+        .locator(`[data-testid=tasker-history] tr[data-booking-id="${IDS.bDisputed}"]`)
+        .getByTestId("booking-dispute"),
+    ).toContainText("under review");
+  });
+});
+
+test.describe("policy versions", () => {
+  test("a version published for 2099-12-31 is not the active policy today", async ({ page }) => {
+    const mock = await mockBackend(page);
+    expect(mock.db.money_policies.map((p) => p.version)).toEqual([1, 2]);
+    await page.goto("/pricing");
+    await expect(page.getByTestId("policy-version")).toContainText("Policy version 1");
+    await expect(page.getByTestId("fee-client")).toContainText("15%");
+    await expect(page.getByTestId("curve-row").first()).toContainText("48 hours or more");
+    await signIn(page, "ava@tasknest.test");
+    await page.goto(`/taskers/${IDS.tara}`);
+    await page.getByTestId("booking-duration").selectOption("120");
+    await expect(page.getByTestId("quote-service-fee")).toHaveText("$13.50");
+    await expect(page.getByTestId("quote-panel")).toContainText("Policy v1");
+  });
+});

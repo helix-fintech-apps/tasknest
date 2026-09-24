@@ -1,18 +1,22 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { type MoneyPolicy, type RefundKind } from "@domain";
-import { api } from "../lib/api";
+import { api, isRefundRequest } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { myBookings, type BookingBundle } from "../lib/data";
 import { fmtDateTime, fmtMinutes, money, parseDollars } from "../lib/format";
 import { usePolicies } from "../lib/policy";
 import {
+  DISPUTE_LABEL,
+  openDispute,
   paidParts,
   previewClientCancel,
   previewRefund,
   TENDER_LABEL,
   tipCap,
+  tippedCents,
   tipProblem,
+  tipRoom,
 } from "../lib/preview";
 import {
   Badge,
@@ -61,6 +65,26 @@ export function TenderBreakdown({ b }: { b: BookingBundle }) {
             )}
           </span>
         ))}
+    </div>
+  );
+}
+
+/** Card dispute status on a booking (the client and the tasker can read their disputes). */
+export function DisputeNote({ b }: { b: BookingBundle }) {
+  if (!b.disputes.length) return null;
+  return (
+    <div className="mt-1 space-y-0.5 text-xs">
+      {b.disputes.map((d) => (
+        <div
+          key={d.id}
+          data-testid="booking-dispute"
+          data-dispute-status={d.status}
+          className={d.status === "won" ? "text-emerald-700" : "text-red-700"}
+        >
+          {DISPUTE_LABEL[d.status] ?? `Card dispute: ${d.status}`} · {money(d.amount_cents)}
+          {d.status === "lost" && Number(d.fee_cents) > 0 && ` (+ ${money(d.fee_cents)} fee)`}
+        </div>
+      ))}
     </div>
   );
 }
@@ -185,10 +209,11 @@ function BookingCard({
   onAction: (k: NonNullable<Dialog>["kind"]) => void;
 }) {
   const b = x.booking;
-  const tipped = x.tips.reduce((a, t) => a + Number(t.amount_cents), 0);
+  const tipped = tippedCents(x.tips);
   const refunded = x.refunds.reduce((a, r) => a + Number(r.amount_cents), 0);
   const cancellable = ["requested", "accepted"].includes(b.status);
   const completed = b.status === "completed";
+  const disputeOpen = !!openDispute(x.disputes);
   return (
     <Card data-testid="booking-card" data-booking-id={b.id} data-status={b.status}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -207,6 +232,7 @@ function BookingCard({
           )}
           {b.description && <div className="mt-1 text-sm text-slate-500">{b.description}</div>}
           <TenderBreakdown b={x} />
+          <DisputeNote b={x} />
         </div>
         <div className="text-right">
           <div
@@ -271,11 +297,17 @@ function BookingCard({
           <Button
             variant="ghost"
             data-testid="refund-open"
-            disabled={!policy}
+            disabled={!policy || disputeOpen}
+            title={disputeOpen ? "Refunds are paused while a card dispute is open" : undefined}
             onClick={() => onAction("refund")}
           >
             Request a refund
           </Button>
+        )}
+        {disputeOpen && (
+          <span className="self-center text-xs text-slate-500" data-testid="refund-paused">
+            Refunds are paused while the card dispute is open.
+          </span>
         )}
         {x.review && (
           <span className="self-center text-sm text-amber-500">{"★".repeat(x.review.rating)}</span>
@@ -450,7 +482,10 @@ function TipDialog({
 }) {
   const [amount, setAmount] = useState("");
   const cents = parseDollars(amount);
-  const problem = amount ? tipProblem(cents, x.booking, policy, new Date()) : null;
+  // The cap covers every tip on the booking together, so the preview counts the tips already paid.
+  const already = tippedCents(x.tips);
+  const room = tipRoom(x.booking, policy, already);
+  const problem = amount ? tipProblem(cents, x.booking, policy, new Date(), already) : null;
   const act = useAction((key: string) => api.tip(x.booking.id, cents!, key));
   const cap = tipCap(Number(x.booking.subtotal_cents), policy);
   return (
@@ -460,6 +495,12 @@ function TipDialog({
         {policy.tips.capBpsOfSubtotal / 100}% of the task subtotal), within {policy.tips.windowDays}{" "}
         days of completion.
       </p>
+      {already > 0 && (
+        <p className="mb-3 text-sm text-slate-600" data-testid="tip-room">
+          You've tipped {money(already)} on this booking so far
+          {room > 0 ? `; you can add up to ${money(room)} more.` : ", the maximum."}
+        </p>
+      )}
       <Field label="Tip amount ($)" id="tip">
         <Input
           id="tip"
@@ -574,6 +615,8 @@ function RefundRequestDialog({
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const cents = kind === "full" ? 0 : (parseDollars(amount) ?? 0);
+  // Clients cannot call the staff-only refund-preview endpoint; the preview uses the domain code with
+  // the booking's figures including extras (see bookingFigures) and its open dispute, if any.
   const pv = previewRefund(
     kind,
     cents,
@@ -583,7 +626,7 @@ function RefundRequestDialog({
     x.booking,
     x.tenders,
     policy,
-    false,
+    !!openDispute(x.disputes),
     new Date(),
   );
   const amt = kind === "full" ? pv.refundable : cents;
@@ -652,7 +695,15 @@ function RefundRequestDialog({
           data-testid="refund-submit"
           disabled={act.pending || !reason.trim() || amt <= 0 || !pv.plan}
           onClick={async () => {
-            if (await act.run()) onDone("Refund request sent.");
+            const r = await act.run();
+            if (!r) return;
+            // A client's refund is a REQUEST (202 {requested: true}): support decides, nothing has
+            // moved yet. Only a staff refund (200 {refund}) is money actually returned.
+            onDone(
+              isRefundRequest(r)
+                ? `Refund requested: ${money(r.amountCents)}. Support will review it; nothing has been refunded yet.`
+                : `Refunded ${money(r.refund.amountCents)}.`,
+            );
           }}
         >
           Submit request

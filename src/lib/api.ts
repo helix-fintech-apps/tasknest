@@ -1,6 +1,11 @@
-// Typed client for the `api` Edge Function (see docs/SPEC.md "API").
+// Typed client for the `api` Edge Function (see docs/API.md).
 // Every call sends the user's Supabase JWT; every mutation sends an Idempotency-Key header.
 // The server is the source of truth for money; the UI only previews with the shared domain code.
+//
+// Idempotency keys: a key is reused for a retry whenever the first attempt may not have finished:
+// network errors, 5xx, and `409 busy` / `409 request_in_progress` (the API never stores those, so a
+// retry with the same key runs the request once). Any other 4xx is a final answer that the API
+// stores and would replay for that key, so the UI starts a new key after it.
 
 import type { Allocation, Quote, RefundKind, TenderParts } from "@domain";
 import { supabase, SUPABASE_ANON_KEY, SUPABASE_URL } from "./supabase";
@@ -17,6 +22,21 @@ export class ApiError extends Error {
   }
 }
 
+/** 409 codes that mean "not processed yet, try again with the same Idempotency-Key". */
+export const RETRY_SAME_KEY_CODES = new Set(["busy", "request_in_progress"]);
+
+/** True when a failed mutation must be retried with the SAME Idempotency-Key. */
+export function keepsIdempotencyKey(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return true; // unknown failure: assume it may have run
+  if (e.status === 0 || e.status >= 500) return true;
+  return e.status === 409 && RETRY_SAME_KEY_CODES.has(e.code);
+}
+
+/** Automatic retries (same key) for `409 busy` / `request_in_progress`, in ms. */
+export const BUSY_RETRY_DELAYS_MS = [400, 800, 1600];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export function newIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -28,6 +48,27 @@ async function call<T>(
   body?: unknown,
   idempotencyKey?: string,
 ): Promise<T> {
+  // One key for every attempt of this call: a busy booking is retried with the same key, so the
+  // request can never run twice.
+  const key = method === "POST" ? (idempotencyKey ?? newIdempotencyKey()) : undefined;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await callOnce<T>(method, path, body, key);
+    } catch (e) {
+      const retryable =
+        e instanceof ApiError && e.status === 409 && RETRY_SAME_KEY_CODES.has(e.code);
+      if (!retryable || attempt >= BUSY_RETRY_DELAYS_MS.length) throw e;
+      await sleep(BUSY_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+async function callOnce<T>(
+  method: "GET" | "POST",
+  path: string,
+  body: unknown,
+  idempotencyKey: string | undefined,
+): Promise<T> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   const headers: Record<string, string> = {
@@ -35,7 +76,7 @@ async function call<T>(
     apikey: SUPABASE_ANON_KEY,
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (method === "POST") headers["Idempotency-Key"] = idempotencyKey ?? newIdempotencyKey();
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -109,6 +150,65 @@ export interface RefundRequestBody {
   reason: string;
   approvedBy?: string;
 }
+
+/** A client's refund REQUEST (202): recorded for support, nothing has been refunded yet. */
+export interface RefundRequested {
+  requested: true;
+  bookingId: string;
+  kind: RefundKind;
+  amountCents: number;
+}
+
+/** A refund issued by support or an admin (200). */
+export interface RefundIssued {
+  refund: {
+    id: string;
+    kind: RefundKind;
+    amountCents: number;
+    perTender: TenderParts;
+    taskerClawbackCents: number;
+    platformCostCents: number;
+    requiresApproval: boolean;
+    approvedBy: string | null;
+    pointsReturned: number;
+    pointsClawedBack: number;
+    pointsDebt: number;
+    providerRefundIds: string[];
+  };
+  [k: string]: unknown;
+}
+
+export type RefundResponse = RefundRequested | RefundIssued;
+
+export function isRefundRequest(r: RefundResponse | null | undefined): r is RefundRequested {
+  return !!r && (r as RefundRequested).requested === true;
+}
+
+/** `POST /bookings/:id/refund-preview` (support/admin): exactly what `refund` would do, no side effects. */
+export interface RefundPreviewResponse {
+  refundableCents: number;
+  plan: {
+    perTender: TenderParts;
+    taskerClawbackCents: number;
+    platformCostCents: number;
+    requiresApproval: boolean;
+    amountCents: number;
+  };
+  pointsReturned: number;
+  pointsClawedBack: number;
+  policyVersion: number;
+}
+
+export interface TipResponse {
+  tip: {
+    id: string;
+    amountCents: number;
+    taskerGets: number;
+    platformFee: number;
+    paymentIntentId: string;
+    tippedTotalCents: number;
+  };
+}
 export interface GenericResponse {
   [k: string]: unknown;
 }
@@ -134,9 +234,12 @@ export const api = {
   complete: (id: string, b: CompleteRequest, key: string) =>
     call<BookingResponse>("POST", `/bookings/${enc(id)}/complete`, b, key),
   tip: (id: string, amountCents: number, key: string) =>
-    call<GenericResponse>("POST", `/bookings/${enc(id)}/tip`, { amountCents }, key),
+    call<TipResponse>("POST", `/bookings/${enc(id)}/tip`, { amountCents }, key),
   refund: (id: string, b: RefundRequestBody, key: string) =>
-    call<GenericResponse>("POST", `/bookings/${enc(id)}/refund`, b, key),
+    call<RefundResponse>("POST", `/bookings/${enc(id)}/refund`, b, key),
+  /** Staff only (clients get 404). Side-effect free: the API does not store its Idempotency-Key. */
+  refundPreview: (id: string, b: RefundRequestBody) =>
+    call<RefundPreviewResponse>("POST", `/bookings/${enc(id)}/refund-preview`, b),
   review: (id: string, rating: number, body: string, key: string) =>
     call<GenericResponse>("POST", `/bookings/${enc(id)}/review`, { rating, body }, key),
   runPayouts: (key: string) => call<GenericResponse>("POST", "/payouts/run", {}, key),
