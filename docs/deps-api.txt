@@ -1,0 +1,26 @@
+# Backend / API test dependencies to merge into package.json (owner of package.json: please merge).
+# Verified on 2026-09-24 against this repo (tests/api run against the hosted project; deno check passes).
+
+## devDependencies
+esbuild        ^0.21.5   # used by scripts/bundle-edge-functions.sh; today only a transitive dep of vite 5 (tested with 0.21.5)
+# already present and required: typescript (the bundle script re-quotes with its scanner), vitest (tests/api)
+# nothing else: tests/api use plain fetch, the Edge Functions import supabase-js via `npm:` (resolved by Deno)
+
+## scripts (add)
+"test:api":          "vitest run tests/api",
+"bundle:functions":  "bash scripts/bundle-edge-functions.sh",
+"check:functions":   "deno check supabase/functions/api/index.ts supabase/functions/stripe-webhook/index.ts"
+
+## tools outside npm
+# deno 2.x   for `check:functions` (CI's typecheck job already installs it with denoland/setup-deno)
+# supabase   CLI 2.117.x for local dev (`supabase start`, `functions serve`), already listed in docs/deps-ci.txt
+
+## notes for the CI owner
+# - The typecheck job runs `deno check supabase/functions/api/index.ts`; consider adding
+#   supabase/functions/stripe-webhook/index.ts to that command too (it passes today).
+# - tests/api read SUPABASE_URL, SUPABASE_ANON_KEY, API_BASE_URL (and optionally SUPABASE_SERVICE_ROLE_KEY),
+#   exactly what scripts/ci/supabase-env.sh exports. They need the functions served with the fake provider
+#   (PAYMENTS_PROVIDER=fake, or no Stripe key at all), as the api job already does.
+# - docs/CI.md lists the staging webhook URL as .../functions/v1/api/webhooks/stripe. The hosted `api` function
+#   requires a JWT, so Stripe must call https://pfqvqencsbxauafahezw.supabase.co/functions/v1/stripe-webhook.
+# - deploy-staging only deploys `api`; it should also run `supabase functions deploy stripe-webhook --no-verify-jwt`.
