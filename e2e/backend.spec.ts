@@ -18,7 +18,9 @@ test("server quote matches the client preview for Tara 2h", async ({ page }) => 
   await page.getByTestId("tasker-card-tara").click();
   await page.getByTestId("booking-duration").selectOption("120");
   await expect(page.getByTestId("quote-total")).toHaveText("$103.50");
-  await expect(page.getByTestId("quote-server-status")).toContainText("Server quote matches", { timeout: 15_000 });
+  await expect(page.getByTestId("quote-server-status")).toContainText("Server quote matches", {
+    timeout: 15_000,
+  });
 });
 
 test("book, then tasker accepts, starts and completes", async ({ page }) => {
@@ -34,7 +36,10 @@ test("book, then tasker accepts, starts and completes", async ({ page }) => {
 
   await page.getByTestId("sign-out").click();
   await signIn(page, "tara@tasknest.test");
-  const job = page.getByTestId("job-card").filter({ has: page.getByTestId("accept") }).first();
+  const job = page
+    .getByTestId("job-card")
+    .filter({ has: page.getByTestId("accept") })
+    .first();
   await job.getByTestId("accept").click();
   await expect(page.getByTestId("flash")).toContainText("accepted");
 });

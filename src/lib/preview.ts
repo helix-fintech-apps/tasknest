@@ -2,16 +2,39 @@
 // these exist so users see exact numbers before they confirm.
 
 import {
-  allocateTenders, applyBps, clientCancellation, emptyParts, promoDiscount, quote, refundAfterRetention,
-  taskerCancellation, validateTip, planRefund, partsTotal, availablePoints, pendingPoints,
-  type Allocation, type CancellationOutcome, type MoneyPolicy, type PromoCode, type Quote, type TenderParts, type RefundKind, type Actor, type RefundPlan, type PointsLot,
+  allocateTenders,
+  applyBps,
+  clientCancellation,
+  emptyParts,
+  promoDiscount,
+  quote,
+  refundAfterRetention,
+  taskerCancellation,
+  validateTip,
+  planRefund,
+  partsTotal,
+  availablePoints,
+  pendingPoints,
+  type Allocation,
+  type CancellationOutcome,
+  type MoneyPolicy,
+  type PromoCode,
+  type Quote,
+  type TenderParts,
+  type RefundKind,
+  type Actor,
+  type RefundPlan,
+  type PointsLot,
 } from "@domain";
 import type { BookingRow, PointsLotRow, PromoCodeRow, TenderRow } from "./supabase";
 import { formatCents } from "@domain";
 
 export function toPromo(row: PromoCodeRow): PromoCode {
   return {
-    code: row.code, kind: row.kind, value: row.value, firstTaskOnly: row.first_task_only,
+    code: row.code,
+    kind: row.kind,
+    value: row.value,
+    firstTaskOnly: row.first_task_only,
     maxDiscountCents: row.max_discount_cents ?? undefined,
     expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
   };
@@ -41,7 +64,14 @@ export interface QuotePreview {
 }
 
 export function previewQuote(i: QuotePreviewInput): QuotePreview {
-  const out: QuotePreview = { quote: null, discountCents: 0, promoError: null, allocation: null, allocationError: null, error: null };
+  const out: QuotePreview = {
+    quote: null,
+    discountCents: 0,
+    promoError: null,
+    allocation: null,
+    allocationError: null,
+    error: null,
+  };
   try {
     out.quote = quote(i.rateCents, i.minutes, i.policy);
   } catch (e) {
@@ -53,7 +83,13 @@ export function previewQuote(i: QuotePreviewInput): QuotePreview {
     if (!i.promo) out.promoError = "Unknown promo code";
     else {
       try {
-        out.discountCents = promoDiscount(toPromo(i.promo), out.quote.subtotal, i.isFirstTask, i.promoAlreadyUsed, i.now);
+        out.discountCents = promoDiscount(
+          toPromo(i.promo),
+          out.quote.subtotal,
+          i.isFirstTask,
+          i.promoAlreadyUsed,
+          i.now,
+        );
       } catch (e) {
         out.promoError = (e as Error).message;
       }
@@ -62,7 +98,12 @@ export function previewQuote(i: QuotePreviewInput): QuotePreview {
   try {
     out.allocation = allocateTenders(
       out.quote.total,
-      { promoCents: out.discountCents, walletCents: i.walletCents, pointsBalance: i.pointsBalance, pointsRequested: i.pointsRequested },
+      {
+        promoCents: out.discountCents,
+        walletCents: i.walletCents,
+        pointsBalance: i.pointsBalance,
+        pointsRequested: i.pointsRequested,
+      },
       i.policy,
     );
   } catch (e) {
@@ -74,7 +115,8 @@ export function previewQuote(i: QuotePreviewInput): QuotePreview {
 /** What each tender actually paid (net of earlier refunds). */
 export function paidParts(tenders: TenderRow[], netOfRefunds = true): TenderParts {
   const p = emptyParts();
-  for (const t of tenders) p[t.tender] += Number(t.amount_cents) - (netOfRefunds ? Number(t.refunded_cents) : 0);
+  for (const t of tenders)
+    p[t.tender] += Number(t.amount_cents) - (netOfRefunds ? Number(t.refunded_cents) : 0);
   return p;
 }
 
@@ -94,8 +136,11 @@ export interface CancelPreview {
 
 export function bookingMoney(b: BookingRow) {
   return {
-    rateCents: Number(b.rate_cents), subtotal: Number(b.subtotal_cents), serviceFee: Number(b.service_fee_cents),
-    tax: Number(b.tax_cents), total: Number(b.total_cents),
+    rateCents: Number(b.rate_cents),
+    subtotal: Number(b.subtotal_cents),
+    serviceFee: Number(b.service_fee_cents),
+    tax: Number(b.tax_cents),
+    total: Number(b.total_cents),
     cutoffAnchorAt: new Date(b.original_start_at), // reschedules never move the cutoff
   };
 }
@@ -105,21 +150,43 @@ export function tierDescription(policy: MoneyPolicy, tierIndex: number): string 
   const t = tiers[tierIndex];
   if (!t) return "";
   const upper = tierIndex > 0 ? tiers[tierIndex - 1].minHoursBefore : null;
-  const window = upper === null ? `${t.minHoursBefore}h or more before start` : t.minHoursBefore === 0 ? `Less than ${upper}h before start (or after)` : `${t.minHoursBefore}–${upper}h before start`;
-  const what = t.chargeMinutesOfRate ? `charged ${t.chargeMinutesOfRate} min of the tasker's rate` : `${t.refundBps / 100}% refunded`;
+  const window =
+    upper === null
+      ? `${t.minHoursBefore}h or more before start`
+      : t.minHoursBefore === 0
+        ? `Less than ${upper}h before start (or after)`
+        : `${t.minHoursBefore}–${upper}h before start`;
+  const what = t.chargeMinutesOfRate
+    ? `charged ${t.chargeMinutesOfRate} min of the tasker's rate`
+    : `${t.refundBps / 100}% refunded`;
   return `${window}: ${what}`;
 }
 
-export function previewClientCancel(b: BookingRow, tenders: TenderRow[], policy: MoneyPolicy, now: Date): CancelPreview {
+export function previewClientCancel(
+  b: BookingRow,
+  tenders: TenderRow[],
+  policy: MoneyPolicy,
+  now: Date,
+): CancelPreview {
   const outcome = clientCancellation(bookingMoney(b), now, policy);
   const { kept, refund } = refundAfterRetention(paidParts(tenders), outcome.retainedCents, policy);
   return { outcome, kept, refund, tierText: tierDescription(policy, outcome.tierIndex) };
 }
 
-export function previewTaskerCancel(b: BookingRow, tenders: TenderRow[], policy: MoneyPolicy): CancelPreview {
+export function previewTaskerCancel(
+  b: BookingRow,
+  tenders: TenderRow[],
+  policy: MoneyPolicy,
+): CancelPreview {
   const outcome = taskerCancellation(bookingMoney(b), policy);
   const { kept, refund } = refundAfterRetention(paidParts(tenders), 0, policy);
-  return { outcome, kept, refund, tierText: "Tasker cancellation: client refunded in full", taskerFeeCents: outcome.taskerFeeCents };
+  return {
+    outcome,
+    kept,
+    refund,
+    tierText: "Tasker cancellation: client refunded in full",
+    taskerFeeCents: outcome.taskerFeeCents,
+  };
 }
 
 export function tipCap(subtotal: number, policy: MoneyPolicy): number {
@@ -127,10 +194,22 @@ export function tipCap(subtotal: number, policy: MoneyPolicy): number {
 }
 
 /** Returns a human message when the tip is not allowed, else null. */
-export function tipProblem(amountCents: number | null, b: BookingRow, policy: MoneyPolicy, now: Date): string | null {
+export function tipProblem(
+  amountCents: number | null,
+  b: BookingRow,
+  policy: MoneyPolicy,
+  now: Date,
+): string | null {
   if (amountCents === null) return "Enter a dollar amount, e.g. 10 or 12.50";
   try {
-    validateTip(amountCents, "card", Number(b.subtotal_cents), b.completed_at ? new Date(b.completed_at) : null, now, policy);
+    validateTip(
+      amountCents,
+      "card",
+      Number(b.subtotal_cents),
+      b.completed_at ? new Date(b.completed_at) : null,
+      now,
+      policy,
+    );
     return null;
   } catch (e) {
     const msg = (e as Error).message;
@@ -143,8 +222,16 @@ export function tipProblem(amountCents: number | null, b: BookingRow, policy: Mo
 }
 
 export function previewRefund(
-  kind: RefundKind, amountCents: number, actor: Actor, reason: string, approvedBy: string | undefined,
-  b: BookingRow, tenders: TenderRow[], policy: MoneyPolicy, disputeOpen: boolean, now: Date,
+  kind: RefundKind,
+  amountCents: number,
+  actor: Actor,
+  reason: string,
+  approvedBy: string | undefined,
+  b: BookingRow,
+  tenders: TenderRow[],
+  policy: MoneyPolicy,
+  disputeOpen: boolean,
+  now: Date,
 ): { plan: RefundPlan | null; error: string | null; refundable: number } {
   const paid = paidParts(tenders, false);
   const already = refundedParts(tenders);
@@ -152,11 +239,23 @@ export function previewRefund(
   const subtotal = Number(b.subtotal_cents);
   try {
     const plan = planRefund(
-      { kind, amountCents: kind === "full" ? Math.max(refundable, 1) : amountCents, actor, approvedBy: approvedBy || undefined, reason, requestedAt: now },
       {
-        paid, alreadyRefunded: already, completedAt: b.completed_at ? new Date(b.completed_at) : null,
-        subtotal, total: Number(b.total_cents), taskerCommissionOnSubtotal: applyBps(subtotal, policy.taskerCommissionBps),
-        taskerPaidOut: false, disputeOpen,
+        kind,
+        amountCents: kind === "full" ? Math.max(refundable, 1) : amountCents,
+        actor,
+        approvedBy: approvedBy || undefined,
+        reason,
+        requestedAt: now,
+      },
+      {
+        paid,
+        alreadyRefunded: already,
+        completedAt: b.completed_at ? new Date(b.completed_at) : null,
+        subtotal,
+        total: Number(b.total_cents),
+        taskerCommissionOnSubtotal: applyBps(subtotal, policy.taskerCommissionBps),
+        taskerPaidOut: false,
+        disputeOpen,
       },
       policy,
     );
@@ -166,7 +265,12 @@ export function previewRefund(
   }
 }
 
-export const TENDER_LABEL: Record<keyof TenderParts, string> = { card: "Card", points: "Points", wallet: "Wallet", promo: "Promo credit" };
+export const TENDER_LABEL: Record<keyof TenderParts, string> = {
+  card: "Card",
+  points: "Points",
+  wallet: "Wallet",
+  promo: "Promo credit",
+};
 
 /**
  * Points summary from the user's lots. "debt" lots (negative balance left by a clawback that
@@ -175,8 +279,22 @@ export const TENDER_LABEL: Record<keyof TenderParts, string> = { card: "Card", p
 export function pointsSummary(rows: PointsLotRow[], now: Date) {
   const lots: PointsLot[] = rows
     .filter((r) => r.kind !== "debt" && r.points_remaining > 0)
-    .map((r) => ({ id: r.id, kind: r.kind as PointsLot["kind"], points: r.points_remaining, availableAt: new Date(r.available_at), expiresAt: new Date(r.expires_at) }));
-  const debt = rows.filter((r) => r.kind === "debt").reduce((a, r) => a + Number(r.points_remaining), 0);
+    .map((r) => ({
+      id: r.id,
+      kind: r.kind as PointsLot["kind"],
+      points: r.points_remaining,
+      availableAt: new Date(r.available_at),
+      expiresAt: new Date(r.expires_at),
+    }));
+  const debt = rows
+    .filter((r) => r.kind === "debt")
+    .reduce((a, r) => a + Number(r.points_remaining), 0);
   const available = availablePoints(lots, now);
-  return { lots, debt, available, availableNet: available + debt, pending: pendingPoints(lots, now) };
+  return {
+    lots,
+    debt,
+    available,
+    availableNet: available + debt,
+    pending: pendingPoints(lots, now),
+  };
 }

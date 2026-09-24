@@ -9,26 +9,55 @@ export default function Taskers() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
   const cats = useMemo(() => [...new Set((data ?? []).map((t) => t.category))].sort(), [data]);
-  const shown = (data ?? []).filter((t) => (!cat || t.category === cat) && `${t.name} ${t.headline} ${t.category}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = (data ?? []).filter(
+    (t) =>
+      (!cat || t.category === cat) &&
+      `${t.name} ${t.headline} ${t.category}`.toLowerCase().includes(q.toLowerCase()),
+  );
 
   return (
     <div>
-      <H1 sub="Vetted, active taskers. Prices are hourly; a service fee is added at checkout.">Find a tasker</H1>
+      <H1 sub="Vetted, active taskers. Prices are hourly; a service fee is added at checkout.">
+        Find a tasker
+      </H1>
       <div className="mb-5 flex flex-wrap gap-3">
-        <Input data-testid="tasker-search" placeholder="Search by name or skill" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
-        <Select data-testid="tasker-category" value={cat} onChange={(e) => setCat(e.target.value)} className="max-w-[12rem]">
+        <Input
+          data-testid="tasker-search"
+          placeholder="Search by name or skill"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="max-w-xs"
+        />
+        <Select
+          data-testid="tasker-category"
+          value={cat}
+          onChange={(e) => setCat(e.target.value)}
+          className="max-w-[12rem]"
+        >
           <option value="">All categories</option>
-          {cats.map((c) => <option key={c}>{c}</option>)}
+          {cats.map((c) => (
+            <option key={c}>{c}</option>
+          ))}
         </Select>
       </div>
       {error && <Banner tone="error">{error}</Banner>}
-      {loading ? <Spinner /> : shown.length === 0 ? <Empty>No taskers match.</Empty> : (
+      {loading ? (
+        <Spinner />
+      ) : shown.length === 0 ? (
+        <Empty>No taskers match.</Empty>
+      ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="tasker-list">
           {shown.map((t) => (
-            <Link key={t.id} to={`/taskers/${t.id}`} data-testid={`tasker-card-${t.name.split(" ")[0].toLowerCase()}`}>
+            <Link
+              key={t.id}
+              to={`/taskers/${t.id}`}
+              data-testid={`tasker-card-${t.name.split(" ")[0].toLowerCase()}`}
+            >
               <Card className="h-full transition hover:border-blue-300 hover:shadow">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 font-semibold text-blue-700">{t.name.charAt(0)}</div>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 font-semibold text-blue-700">
+                    {t.name.charAt(0)}
+                  </div>
                   <div>
                     <div className="font-semibold text-slate-900">{t.name}</div>
                     <div className="text-xs text-slate-500">{t.category}</div>

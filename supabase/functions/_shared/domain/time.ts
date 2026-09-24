@@ -6,11 +6,24 @@ const MS_DAY = 86_400_000;
 /** Offset (minutes) of `tz` from UTC at the given instant. */
 function tzOffsetMinutes(instant: Date, tz: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hourCycle: "h23",
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   }).formatToParts(instant);
   const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
-  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour"),
+    get("minute"),
+    get("second"),
+  );
   return Math.round((asUtc - instant.getTime()) / 60_000);
 }
 
@@ -23,7 +36,7 @@ export function localToUtc(localIso: string, tz: string): Date {
   const [y, mo, da] = d.split("-").map(Number);
   const [h, mi] = (t ?? "00:00").split(":").map(Number);
   const guess = Date.UTC(y, mo - 1, da, h, mi);
-  let offset = tzOffsetMinutes(new Date(guess), tz);
+  const offset = tzOffsetMinutes(new Date(guess), tz);
   let result = guess - offset * 60_000;
   const offset2 = tzOffsetMinutes(new Date(result), tz);
   if (offset2 !== offset) result = guess - offset2 * 60_000;

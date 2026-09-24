@@ -8,13 +8,13 @@ See [`docs/SPEC.md`](docs/SPEC.md) for the full build spec and API contract.
 
 ## Stack
 
-| Layer | Tech |
-|---|---|
-| Frontend | Vite 5, React 18, TypeScript, Tailwind CSS v4, React Router 6 |
-| Backend | Supabase (Postgres + RLS, Auth), Edge Function `api` (Deno) |
+| Layer        | Tech                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| Frontend     | Vite 5, React 18, TypeScript, Tailwind CSS v4, React Router 6                            |
+| Backend      | Supabase (Postgres + RLS, Auth), Edge Function `api` (Deno)                              |
 | Money domain | `supabase/functions/_shared/domain/*.ts`, shared by the API and the UI (`@domain` alias) |
-| Payments | Stripe test mode, or a deterministic `fake` provider for CI and local dev |
-| Tests | Vitest (domain unit tests), Playwright (e2e) |
+| Payments     | Stripe test mode, or a deterministic `fake` provider for CI and local dev                |
+| Tests        | Vitest (domain unit tests), Playwright (e2e)                                             |
 
 ### How the frontend handles money
 
@@ -24,15 +24,15 @@ See [`docs/SPEC.md`](docs/SPEC.md) for the full build spec and API contract.
 
 ## Pages
 
-| Route | Who | What |
-|---|---|---|
-| `/signin` | everyone | Email/password sign-in and the list of demo accounts |
-| `/taskers`, `/taskers/:id` | client | Browse taskers, profile, booking form with a live quote panel |
-| `/bookings` | client | Cancel (shows the exact refund before you confirm), reschedule, tip, review, request a refund |
-| `/points` | client | Available, pending and expiring points, lots, history |
-| `/tasker` | tasker | Requests (accept/decline), start/complete with extra time and expenses, earnings, balance, payouts, strikes, status banner |
-| `/console` | admin, support_agent | Booking search, refunds (full/partial/goodwill, approver), tasker suspend/activate, dispute simulation, payout run, ledger |
-| `/pricing` | public | Fees, cancellation curve, tips, points, refund order, rendered from the active `money_policies` row |
+| Route                      | Who                  | What                                                                                                                       |
+| -------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/signin`                  | everyone             | Email/password sign-in and the list of demo accounts                                                                       |
+| `/taskers`, `/taskers/:id` | client               | Browse taskers, profile, booking form with a live quote panel                                                              |
+| `/bookings`                | client               | Cancel (shows the exact refund before you confirm), reschedule, tip, review, request a refund                              |
+| `/points`                  | client               | Available, pending and expiring points, lots, history                                                                      |
+| `/tasker`                  | tasker               | Requests (accept/decline), start/complete with extra time and expenses, earnings, balance, payouts, strikes, status banner |
+| `/console`                 | admin, support_agent | Booking search, refunds (full/partial/goodwill, approver), tasker suspend/activate, dispute simulation, payout run, ledger |
+| `/pricing`                 | public               | Fees, cancellation curve, tips, points, refund order, rendered from the active `money_policies` row                        |
 
 ## Run locally
 
@@ -44,13 +44,13 @@ npm run dev              # http://localhost:5173
 
 ### Environment
 
-| Variable | Purpose |
-|---|---|
-| `VITE_SUPABASE_URL` | Supabase project URL (`https://pfqvqencsbxauafahezw.supabase.co`) |
-| `VITE_SUPABASE_ANON_KEY` | Publishable/anon key. It is public, and RLS protects the data. |
-| `E2E_BASE_URL` | Playwright target. When unset, Playwright starts `npm run dev`. |
-| `E2E_BACKEND=1` | Also run the e2e tests that need the live backend (`e2e/backend.spec.ts`) |
-| `PW_CHROMIUM_PATH` | Optional Chromium binary. Defaults to `/opt/pw-browsers/chromium` if it exists, otherwise the Playwright cache (`npx playwright install chromium`). |
+| Variable                 | Purpose                                                                                                                                             |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_SUPABASE_URL`      | Supabase project URL (`https://pfqvqencsbxauafahezw.supabase.co`)                                                                                   |
+| `VITE_SUPABASE_ANON_KEY` | Publishable/anon key. It is public, and RLS protects the data.                                                                                      |
+| `E2E_BASE_URL`           | Playwright target. When unset, Playwright starts `npm run dev`.                                                                                     |
+| `E2E_BACKEND=1`          | Also run the e2e tests that need the live backend (`e2e/backend.spec.ts`)                                                                           |
+| `PW_CHROMIUM_PATH`       | Optional Chromium binary. Defaults to `/opt/pw-browsers/chromium` if it exists, otherwise the Playwright cache (`npx playwright install chromium`). |
 
 Never commit `.env` or any service-role or Stripe secret. The browser only ever needs the publishable key.
 
@@ -58,28 +58,28 @@ Never commit `.env` or any service-role or Stripe secret. The browser only ever 
 
 All demo accounts use the password `TaskNest!2026`. They are for the test environment only.
 
-| Email | Role |
-|---|---|
-| ava@tasknest.test | client |
-| ben@tasknest.test | client |
-| tara@tasknest.test | tasker: Handyman, $45/h, active |
-| leo@tasknest.test | tasker: Cleaning, $38/h, active |
-| pia@tasknest.test | tasker: Moving, $60/h, pending KYC |
-| admin@tasknest.test | admin |
-| agent@tasknest.test | support agent |
+| Email               | Role                               |
+| ------------------- | ---------------------------------- |
+| ava@tasknest.test   | client                             |
+| ben@tasknest.test   | client                             |
+| tara@tasknest.test  | tasker: Handyman, $45/h, active    |
+| leo@tasknest.test   | tasker: Cleaning, $38/h, active    |
+| pia@tasknest.test   | tasker: Moving, $60/h, pending KYC |
+| admin@tasknest.test | admin                              |
+| agent@tasknest.test | support agent                      |
 
 For example, Tara for 2 hours is a $90.00 subtotal plus a $13.50 service fee (15%), for a $103.50 total.
 
 ## Scripts
 
-| Script | Does |
-|---|---|
-| `npm run dev` | Vite dev server |
-| `npm run build` | Typecheck and production build to `dist/` |
-| `npm run preview` | Serve the build |
-| `npm run typecheck` | `tsc -b --noEmit` |
-| `npm test` / `npm run test:unit` | Vitest unit tests for the money domain |
-| `npm run test:e2e` | Playwright tests |
+| Script                           | Does                                      |
+| -------------------------------- | ----------------------------------------- |
+| `npm run dev`                    | Vite dev server                           |
+| `npm run build`                  | Typecheck and production build to `dist/` |
+| `npm run preview`                | Serve the build                           |
+| `npm run typecheck`              | `tsc -b --noEmit`                         |
+| `npm test` / `npm run test:unit` | Vitest unit tests for the money domain    |
+| `npm run test:e2e`               | Playwright tests                          |
 
 ### E2E tests
 

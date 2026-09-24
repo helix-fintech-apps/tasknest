@@ -15,12 +15,12 @@ export interface CancellationTier {
 export interface MoneyPolicy {
   version: number;
   currency: "USD";
-  clientServiceFeeBps: number;     // added to the client's total
-  taskerCommissionBps: number;     // deducted from the tasker's earnings
-  taxBps: number;                  // tax on (subtotal + service fee)
+  clientServiceFeeBps: number; // added to the client's total
+  taskerCommissionBps: number; // deducted from the tasker's earnings
+  taxBps: number; // tax on (subtotal + service fee)
   cancellation: {
-    tiers: CancellationTier[];     // highest minHoursBefore first
-    noShowRefundBps: number;       // client no-show
+    tiers: CancellationTier[]; // highest minHoursBefore first
+    noShowRefundBps: number; // client no-show
     serviceFeeRefundable: boolean; // is the client service fee refunded on cancellation?
   };
   taskerPenalty: {
@@ -29,24 +29,24 @@ export interface MoneyPolicy {
     strikeWindowDays: number;
   };
   tips: {
-    capBpsOfSubtotal: number;      // max tip as share of task subtotal
-    windowDays: number;            // days after completion a tip is allowed
-    platformFeeBps: number;        // must be 0: tips pass through 100%
-    allowedTenders: Tender[];      // tips are cash only
+    capBpsOfSubtotal: number; // max tip as share of task subtotal
+    windowDays: number; // days after completion a tip is allowed
+    platformFeeBps: number; // must be 0: tips pass through 100%
+    allowedTenders: Tender[]; // tips are cash only
   };
   points: {
     centsPerPoint: number;
-    pointsPerDollarCash: number;   // earned on card cash paid, excluding tax and tips
+    pointsPerDollarCash: number; // earned on card cash paid, excluding tax and tips
     minRedeemPoints: number;
     maxRedeemBpsOfTotal: number;
-    pendingDays: number;           // earned points pending until completion + N days
+    pendingDays: number; // earned points pending until completion + N days
     expiryMonths: number;
     reissueDaysOnExpiredRefund: number;
     reviewBonusPoints: number;
   };
-  tenderUseOrder: Tender[];        // order tenders are applied at checkout
-  refundOrder: Tender[];           // order partial refunds go back
-  retentionOrder: Tender[];        // which tender a cancellation fee is taken from first
+  tenderUseOrder: Tender[]; // order tenders are applied at checkout
+  refundOrder: Tender[]; // order partial refunds go back
+  retentionOrder: Tender[]; // which tender a cancellation fee is taken from first
   payouts: { holdDays: number };
   refunds: { agentLimitCents: number; windowDays: number; providerShare: "proportional" };
   auth: { validityDays: number; reauthBufferDays: number };

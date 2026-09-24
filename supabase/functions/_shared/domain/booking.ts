@@ -1,20 +1,26 @@
 // Booking state machine.
 
 export type BookingStatus =
-  | "requested"          // client booked, card authorized, waiting for tasker
+  | "requested" // client booked, card authorized, waiting for tasker
   | "accepted"
   | "in_progress"
   | "completed"
   | "canceled_client"
   | "canceled_tasker"
-  | "declined"           // tasker declined or didn't respond in time
+  | "declined" // tasker declined or didn't respond in time
   | "no_show_client"
   | "no_show_tasker"
   | "disputed";
 
 const allowed: Record<BookingStatus, BookingStatus[]> = {
   requested: ["accepted", "declined", "canceled_client"],
-  accepted: ["in_progress", "canceled_client", "canceled_tasker", "no_show_client", "no_show_tasker"],
+  accepted: [
+    "in_progress",
+    "canceled_client",
+    "canceled_tasker",
+    "no_show_client",
+    "no_show_tasker",
+  ],
   in_progress: ["completed", "no_show_client"],
   completed: ["disputed"],
   canceled_client: [],
@@ -34,6 +40,11 @@ export function assertTransition(from: BookingStatus, to: BookingStatus): void {
 }
 
 /** Card authorizations expire; bookings further out than the validity window need re-authorization. */
-export function needsReauth(bookedAt: Date, startAt: Date, validityDays: number, bufferDays: number): boolean {
+export function needsReauth(
+  bookedAt: Date,
+  startAt: Date,
+  validityDays: number,
+  bufferDays: number,
+): boolean {
   return startAt.getTime() - bookedAt.getTime() > (validityDays - bufferDays) * 86_400_000;
 }

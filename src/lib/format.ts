@@ -20,8 +20,13 @@ export function parseDollars(input: string): number | null {
 export function fmtDateTime(iso: string | Date, tz?: string): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;
   return new Intl.DateTimeFormat("en-US", {
-    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-    timeZone: tz, timeZoneName: tz ? "short" : undefined,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+    timeZoneName: tz ? "short" : undefined,
   }).format(d);
 }
 
@@ -31,7 +36,8 @@ export function fmtDate(iso: string | Date): string {
 }
 
 export function fmtMinutes(m: number): string {
-  const h = Math.floor(m / 60), r = m % 60;
+  const h = Math.floor(m / 60),
+    r = m % 60;
   return h && r ? `${h}h ${r}m` : h ? `${h}h` : `${r}m`;
 }
 

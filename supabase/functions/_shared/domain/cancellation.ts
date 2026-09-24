@@ -16,16 +16,20 @@ export interface BookingMoney {
 }
 
 export interface CancellationOutcome {
-  tierIndex: number;        // -1 for provider cancel / no-show rules
+  tierIndex: number; // -1 for provider cancel / no-show rules
   hoursBefore: number;
-  retainedCents: Cents;     // kept from the client (fee)
-  refundCents: Cents;       // returned to the client
-  taskerPayCents: Cents;    // paid to the tasker out of the retained amount
-  platformCents: Cents;     // platform keeps
+  retainedCents: Cents; // kept from the client (fee)
+  refundCents: Cents; // returned to the client
+  taskerPayCents: Cents; // paid to the tasker out of the retained amount
+  platformCents: Cents; // platform keeps
 }
 
 /** Client cancels. Tiers are evaluated from highest minHoursBefore; boundary is inclusive (>=). */
-export function clientCancellation(b: BookingMoney, cancelAt: Date, policy: MoneyPolicy): CancellationOutcome {
+export function clientCancellation(
+  b: BookingMoney,
+  cancelAt: Date,
+  policy: MoneyPolicy,
+): CancellationOutcome {
   const hoursBefore = hoursBetween(cancelAt, b.cutoffAnchorAt);
   const tiers = [...policy.cancellation.tiers].sort((a, z) => z.minHoursBefore - a.minHoursBefore);
   let tierIndex = tiers.findIndex((t) => hoursBefore >= t.minHoursBefore);
@@ -46,7 +50,10 @@ export function clientCancellation(b: BookingMoney, cancelAt: Date, policy: Mone
     retained = b.total - refund;
     // The tasker is paid (less commission) for the labor that is NOT refunded. The retained part of the
     // service fee and tax is not labor: it stays with the platform.
-    const retainedLabor = Math.max(0, Math.min(retained, b.subtotal - applyBps(b.subtotal, tier.refundBps)));
+    const retainedLabor = Math.max(
+      0,
+      Math.min(retained, b.subtotal - applyBps(b.subtotal, tier.refundBps)),
+    );
     taskerPay = retainedLabor - applyBps(retainedLabor, policy.taskerCommissionBps);
   }
   return {
@@ -60,7 +67,10 @@ export function clientCancellation(b: BookingMoney, cancelAt: Date, policy: Mone
 }
 
 /** Tasker cancels or no-shows: client always gets 100% back including fees. Tasker gets a strike + fee. */
-export function taskerCancellation(b: BookingMoney, policy: MoneyPolicy): CancellationOutcome & { taskerFeeCents: Cents } {
+export function taskerCancellation(
+  b: BookingMoney,
+  policy: MoneyPolicy,
+): CancellationOutcome & { taskerFeeCents: Cents } {
   return {
     tierIndex: -1,
     hoursBefore: NaN,
@@ -77,9 +87,19 @@ export function clientNoShow(b: BookingMoney, policy: MoneyPolicy): Cancellation
   const refund = applyBps(b.total, policy.cancellation.noShowRefundBps);
   const retained = b.total - refund;
   // Only the labor that is not refunded is paid to the tasker (never the service fee or tax).
-  const labor = Math.min(retained, b.subtotal - applyBps(b.subtotal, policy.cancellation.noShowRefundBps));
+  const labor = Math.min(
+    retained,
+    b.subtotal - applyBps(b.subtotal, policy.cancellation.noShowRefundBps),
+  );
   const taskerPay = labor - applyBps(labor, policy.taskerCommissionBps);
-  return { tierIndex: -1, hoursBefore: NaN, retainedCents: retained, refundCents: refund, taskerPayCents: taskerPay, platformCents: retained - taskerPay };
+  return {
+    tierIndex: -1,
+    hoursBefore: NaN,
+    retainedCents: retained,
+    refundCents: refund,
+    taskerPayCents: taskerPay,
+    platformCents: retained - taskerPay,
+  };
 }
 
 /** Strikes within the window; returns whether the tasker should be suspended. */

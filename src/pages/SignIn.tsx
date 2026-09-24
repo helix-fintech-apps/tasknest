@@ -43,30 +43,70 @@ export default function SignIn() {
       <Card>
         <h1 className="mb-1 text-2xl font-semibold text-slate-900">Sign in to TaskNest</h1>
         <p className="mb-5 text-sm text-slate-500">Book trusted help for everyday tasks.</p>
-        {error && <Banner tone="error" testId="signin-error">{error}</Banner>}
+        {error && (
+          <Banner tone="error" testId="signin-error">
+            {error}
+          </Banner>
+        )}
         <form onSubmit={submit}>
           <Field label="Email" id="email">
-            <Input id="email" data-testid="signin-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <Input
+              id="email"
+              data-testid="signin-email"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </Field>
           <Field label="Password" id="password">
-            <Input id="password" data-testid="signin-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <Input
+              id="password"
+              data-testid="signin-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
           </Field>
-          <Button data-testid="signin-submit" type="submit" className="mt-2 w-full" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</Button>
+          <Button
+            data-testid="signin-submit"
+            type="submit"
+            className="mt-2 w-full"
+            disabled={pending}
+          >
+            {pending ? "Signing in…" : "Sign in"}
+          </Button>
         </form>
       </Card>
       <Card data-testid="demo-accounts">
         <h2 className="mb-1 font-semibold text-slate-900">Demo accounts</h2>
         <p className="mb-3 text-sm text-slate-500">
-          Test environment only. Password for all: <code className="rounded bg-slate-100 px-1">{DEMO_PASSWORD}</code>
+          Test environment only. Password for all:{" "}
+          <code className="rounded bg-slate-100 px-1">{DEMO_PASSWORD}</code>
         </p>
         <ul className="divide-y divide-slate-100">
           {DEMO_ACCOUNTS.map((a) => (
             <li key={a.email} className="flex items-center justify-between py-2">
               <div>
                 <div className="text-sm font-medium text-slate-800">{a.email}</div>
-                <div className="text-xs text-slate-500">{a.role}{a.note && ` · ${a.note}`}</div>
+                <div className="text-xs text-slate-500">
+                  {a.role}
+                  {a.note && ` · ${a.note}`}
+                </div>
               </div>
-              <Button variant="secondary" data-testid={`demo-${a.email.split("@")[0]}`} onClick={() => { setEmail(a.email); setPassword(DEMO_PASSWORD); }}>Use</Button>
+              <Button
+                variant="secondary"
+                data-testid={`demo-${a.email.split("@")[0]}`}
+                onClick={() => {
+                  setEmail(a.email);
+                  setPassword(DEMO_PASSWORD);
+                }}
+              >
+                Use
+              </Button>
             </li>
           ))}
         </ul>

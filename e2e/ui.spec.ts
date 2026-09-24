@@ -73,7 +73,14 @@ test.describe("booking", () => {
     await page.getByTestId("book-submit").click();
     await expect(page).toHaveURL(/\/bookings$/);
     const call = mock.apiCalls.find((c) => c.path === "/bookings");
-    expect(call?.body).toMatchObject({ taskerId: IDS.tara, minutes: 120, pointsRequested: 1000, localStart: "2030-03-10T10:00", tz: "America/Los_Angeles", description: "Mount a TV" });
+    expect(call?.body).toMatchObject({
+      taskerId: IDS.tara,
+      minutes: 120,
+      pointsRequested: 1000,
+      localStart: "2030-03-10T10:00",
+      tz: "America/Los_Angeles",
+      description: "Mount a TV",
+    });
     expect(call?.headers["idempotency-key"]).toBeTruthy();
     expect(call?.headers["authorization"]).toMatch(/^Bearer /);
   });
@@ -93,7 +100,8 @@ test.describe("booking", () => {
 });
 
 test.describe("cancellation preview", () => {
-  const card = (page: import("@playwright/test").Page, id: string) => page.locator(`[data-testid=booking-card][data-booking-id="${id}"]`);
+  const card = (page: import("@playwright/test").Page, id: string) =>
+    page.locator(`[data-testid=booking-card][data-booking-id="${id}"]`);
 
   test("≥48h: full refund", async ({ page }) => {
     await mockBackend(page);
@@ -134,9 +142,14 @@ test.describe("tips", () => {
     const mock = await mockBackend(page);
     await signIn(page, "ava@tasknest.test");
     await page.getByTestId("nav-bookings").click();
-    await page.locator(`[data-testid=booking-card][data-booking-id="${IDS.bDone}"]`).getByTestId("tip-open").click();
+    await page
+      .locator(`[data-testid=booking-card][data-booking-id="${IDS.bDone}"]`)
+      .getByTestId("tip-open")
+      .click();
     await page.getByTestId("tip-input").fill("30");
-    await expect(page.getByTestId("tip-error")).toHaveText("Tip can't be more than $22.50 (25% of the $90.00 task subtotal)");
+    await expect(page.getByTestId("tip-error")).toHaveText(
+      "Tip can't be more than $22.50 (25% of the $90.00 task subtotal)",
+    );
     await expect(page.getByTestId("tip-confirm")).toBeDisabled();
     await page.getByTestId("tip-input").fill("22.50");
     await expect(page.getByTestId("tip-error")).toHaveCount(0);
@@ -157,14 +170,20 @@ test.describe("tasker", () => {
     const acceptCall = mock.apiCalls.find((c) => c.path === `/bookings/${IDS.bReq}/accept`);
     expect(acceptCall?.headers["idempotency-key"]).toBeTruthy();
 
-    await page.locator(`[data-testid=job-card][data-booking-id="${IDS.bProg}"]`).getByTestId("complete-open").click();
+    await page
+      .locator(`[data-testid=job-card][data-booking-id="${IDS.bProg}"]`)
+      .getByTestId("complete-open")
+      .click();
     await page.getByTestId("complete-extra-minutes").fill("30");
     await page.getByTestId("complete-expenses").fill("12.50");
     await expect(page.getByTestId("complete-extra-labor")).toHaveText("$22.50");
     await expect(page.getByTestId("complete-expense-amount")).toHaveText("$12.50");
     await page.getByTestId("complete-confirm").click();
     await expect(page.getByTestId("flash")).toContainText("completed");
-    expect(mock.apiCalls.find((c) => c.path === `/bookings/${IDS.bProg}/complete`)?.body).toEqual({ extraMinutes: 30, expensesCents: 1250 });
+    expect(mock.apiCalls.find((c) => c.path === `/bookings/${IDS.bProg}/complete`)?.body).toEqual({
+      extraMinutes: 30,
+      expensesCents: 1250,
+    });
   });
 
   test("pending tasker sees a status banner", async ({ page }) => {
@@ -192,7 +211,9 @@ test.describe("pricing page (published terms)", () => {
     await expect(page.getByTestId("tips-cap")).toContainText("25%");
     await expect(page.getByTestId("tips-share")).toHaveText("100%");
     await expect(page.getByTestId("points-min")).toContainText("500");
-    await expect(page.getByTestId("refund-order")).toHaveText("Card → Wallet → Points → Promo credit");
+    await expect(page.getByTestId("refund-order")).toHaveText(
+      "Card → Wallet → Points → Promo credit",
+    );
   });
 });
 

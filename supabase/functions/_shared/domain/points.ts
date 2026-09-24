@@ -9,8 +9,8 @@ export type LotKind = "earn" | "bonus" | "reissue";
 export interface PointsLot {
   id: string;
   kind: LotKind;
-  points: number;       // remaining points in the lot
-  availableAt: Date;    // pending until this time
+  points: number; // remaining points in the lot
+  availableAt: Date; // pending until this time
   expiresAt: Date;
 }
 
@@ -18,7 +18,12 @@ export interface PointsLot {
  * Points earned on a booking. Base = card cash paid for the task, excluding tax and tips.
  * Points, wallet and promo credit never earn points.
  */
-export function pointsEarned(cardPaid: Cents, taxOnBooking: Cents, bookingTotal: Cents, policy: MoneyPolicy): number {
+export function pointsEarned(
+  cardPaid: Cents,
+  taxOnBooking: Cents,
+  bookingTotal: Cents,
+  policy: MoneyPolicy,
+): number {
   if (cardPaid <= 0 || bookingTotal <= 0) return 0;
   // Tax is allocated to the card in proportion to the card's share of the total.
   const taxOnCard = Math.floor((taxOnBooking * cardPaid) / bookingTotal);
@@ -26,13 +31,26 @@ export function pointsEarned(cardPaid: Cents, taxOnBooking: Cents, bookingTotal:
   return Math.floor(base / 100) * policy.points.pointsPerDollarCash;
 }
 
-export function newEarnLot(id: string, points: number, completedAt: Date, policy: MoneyPolicy): PointsLot {
+export function newEarnLot(
+  id: string,
+  points: number,
+  completedAt: Date,
+  policy: MoneyPolicy,
+): PointsLot {
   const availableAt = addDays(completedAt, policy.points.pendingDays);
-  return { id, kind: "earn", points, availableAt, expiresAt: addMonths(availableAt, policy.points.expiryMonths) };
+  return {
+    id,
+    kind: "earn",
+    points,
+    availableAt,
+    expiresAt: addMonths(availableAt, policy.points.expiryMonths),
+  };
 }
 
 export function availablePoints(lots: PointsLot[], now: Date): number {
-  return lots.filter((l) => l.availableAt <= now && l.expiresAt > now).reduce((a, l) => a + l.points, 0);
+  return lots
+    .filter((l) => l.availableAt <= now && l.expiresAt > now)
+    .reduce((a, l) => a + l.points, 0);
 }
 
 export function pendingPoints(lots: PointsLot[], now: Date): number {
@@ -40,9 +58,15 @@ export function pendingPoints(lots: PointsLot[], now: Date): number {
 }
 
 /** Take points from available lots, soonest-expiring first. Returns the lots consumed. */
-export function consumeFifo(lots: PointsLot[], points: number, now: Date): { lotId: string; points: number }[] {
+export function consumeFifo(
+  lots: PointsLot[],
+  points: number,
+  now: Date,
+): { lotId: string; points: number }[] {
   if (points > availablePoints(lots, now)) throw new Error("not enough available points");
-  const usable = lots.filter((l) => l.availableAt <= now && l.expiresAt > now).sort((a, b) => +a.expiresAt - +b.expiresAt);
+  const usable = lots
+    .filter((l) => l.availableAt <= now && l.expiresAt > now)
+    .sort((a, b) => +a.expiresAt - +b.expiresAt);
   const taken: { lotId: string; points: number }[] = [];
   let left = points;
   for (const l of usable) {
@@ -71,6 +95,8 @@ export function pointsToReturn(
   policy: MoneyPolicy,
 ): { points: number; expiresAt: Date }[] {
   return redeemedFrom.map((r) =>
-    r.expiresAt > now ? r : { points: r.points, expiresAt: addDays(now, policy.points.reissueDaysOnExpiredRefund) },
+    r.expiresAt > now
+      ? r
+      : { points: r.points, expiresAt: addDays(now, policy.points.reissueDaysOnExpiredRefund) },
   );
 }

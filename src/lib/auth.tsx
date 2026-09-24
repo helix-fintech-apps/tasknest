@@ -14,7 +14,11 @@ interface AuthState {
 const Ctx = createContext<AuthState | null>(null);
 
 async function loadProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase.from("profiles").select("id, role, full_name, home_tz").eq("id", userId).maybeSingle();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, role, full_name, home_tz")
+    .eq("id", userId)
+    .maybeSingle();
   if (error) throw error;
   return (data as Profile) ?? null;
 }
@@ -36,11 +40,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(s);
       if (!s) setProfile(null);
     });
-    return () => { alive = false; sub.subscription.unsubscribe(); };
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const value: AuthState = {
-    session, profile, loading,
+    session,
+    profile,
+    loading,
     async signIn(email, password) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -69,9 +78,12 @@ export function useAuth(): AuthState {
 
 export function homeFor(role: Profile["role"] | undefined): string {
   switch (role) {
-    case "tasker": return "/tasker";
+    case "tasker":
+      return "/tasker";
     case "admin":
-    case "support_agent": return "/console";
-    default: return "/taskers";
+    case "support_agent":
+      return "/console";
+    default:
+      return "/taskers";
   }
 }

@@ -8,7 +8,8 @@ const baseURL = externalBaseUrl || "http://localhost:5173";
 // Browser: an explicit PW_CHROMIUM_PATH, else a preinstalled Chromium at /opt/pw-browsers/chromium,
 // else whatever `npx playwright install chromium` put in the default cache.
 const preinstalled = "/opt/pw-browsers/chromium";
-const executablePath = process.env.PW_CHROMIUM_PATH || (existsSync(preinstalled) ? preinstalled : undefined);
+const executablePath =
+  process.env.PW_CHROMIUM_PATH || (existsSync(preinstalled) ? preinstalled : undefined);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -24,9 +25,20 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"], launchOptions: executablePath ? { executablePath } : {} } },
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: executablePath ? { executablePath } : {},
+      },
+    },
   ],
   webServer: externalBaseUrl
     ? undefined
-    : { command: "npm run dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 60_000 },
+    : {
+        command: "npm run dev",
+        url: baseURL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 60_000,
+      },
 });

@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
@@ -13,19 +9,11 @@
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
-    "types": [
-      "vitest/globals",
-      "vite/client",
-      "node"
-    ],
+    "types": ["vitest/globals", "vite/client", "node"],
     "baseUrl": ".",
     "paths": {
-      "@domain": [
-        "supabase/functions/_shared/domain/index.ts"
-      ],
-      "@domain/*": [
-        "supabase/functions/_shared/domain/*"
-      ]
+      "@domain": ["supabase/functions/_shared/domain/index.ts"],
+      "@domain/*": ["supabase/functions/_shared/domain/*"]
     },
     "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo"
   },

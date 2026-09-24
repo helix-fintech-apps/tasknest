@@ -5,7 +5,7 @@ import { MoneyPolicy, Tender } from "./config.ts";
 
 export interface TenderParts {
   card: Cents;
-  points: Cents;   // cash value of points used
+  points: Cents; // cash value of points used
   wallet: Cents;
   promo: Cents;
 }
@@ -18,7 +18,7 @@ export interface Allocation {
 export interface Available {
   promoCents: Cents;
   walletCents: Cents;
-  pointsBalance: number;   // available (not pending, not reserved) points
+  pointsBalance: number; // available (not pending, not reserved) points
   pointsRequested: number; // how many points the client chose to use (0 = none)
 }
 
@@ -50,7 +50,8 @@ export function allocateTenders(total: Cents, avail: Available, policy: MoneyPol
     } else if (tender === "points") {
       const req = avail.pointsRequested;
       if (req <= 0) continue;
-      if (req < policy.points.minRedeemPoints) throw new Error(`minimum redemption is ${policy.points.minRedeemPoints} points`);
+      if (req < policy.points.minRedeemPoints)
+        throw new Error(`minimum redemption is ${policy.points.minRedeemPoints} points`);
       if (req > avail.pointsBalance) throw new Error("not enough available points");
       const capCents = applyBps(total, policy.points.maxRedeemBpsOfTotal);
       const maxCents = Math.min(remaining, capCents);
@@ -92,7 +93,11 @@ export function splitRefund(
  * For a cancellation that retains `retained` cents (a fee), work out how much of each
  * tender is kept (taken from tenders in retentionOrder) and refund the rest.
  */
-export function refundAfterRetention(paid: TenderParts, retained: Cents, policy: MoneyPolicy): { kept: TenderParts; refund: TenderParts } {
+export function refundAfterRetention(
+  paid: TenderParts,
+  retained: Cents,
+  policy: MoneyPolicy,
+): { kept: TenderParts; refund: TenderParts } {
   const kept = emptyParts();
   let remaining = Math.min(retained, partsTotal(paid));
   for (const t of policy.retentionOrder) {
