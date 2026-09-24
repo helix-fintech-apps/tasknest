@@ -18,9 +18,11 @@ See [`docs/SPEC.md`](docs/SPEC.md) for the full build spec and API contract.
 
 ### How the frontend handles money
 
-- **Reads** go straight to Postgres through `supabase-js`, under row-level security.
-- **Writes** always go to the `api` Edge Function (`src/lib/api.ts`). Each request carries the user's JWT and an `Idempotency-Key`. The key is reused when a request fails on the network or with a 5xx, so a retry cannot double-charge.
-- **Previews** (the quote panel, cancel refund, tip cap, refund split) call the shared domain functions (`quote`, `allocateTenders`, `promoDiscount`, `clientCancellation`, `refundAfterRetention`, `validateTip`, `planRefund`). They use the booking's own `policy_version`. The server remains the source of truth, and the booking page shows a warning if the server's quote doesn't match the preview.
+- **Reads** go straight to Postgres through `supabase-js`, under row-level security. Other people's names come from `display_names` (a tasker's full name, everyone else's first name) and `taskers.display_name`; `profiles` is private and only read for the signed-in user.
+- **Writes** always go to the `api` Edge Function (`src/lib/api.ts`). Each request carries the user's JWT and an `Idempotency-Key`. The key is reused when the request may not have run to completion: a network error, a 5xx, or `409 busy` / `409 request_in_progress` (which the client also retries automatically a few times, with the same key). Any other 4xx is a final answer, so the next attempt gets a new key. A retry therefore cannot double-charge.
+- **Refunds**: a client's refund is only a request (`202 {requested: true}`) and the UI says so; support and admins issue refunds from the console.
+- **Previews** (the quote panel, cancel refund, tip cap, refund split) call the shared domain functions (`quote`, `allocateTenders`, `promoDiscount`, `clientCancellation`, `refundAfterRetention`, `validateTip`, `planRefund`). They use the booking's own `policy_version`, and the tip cap counts the tips already paid on the booking. The console's refund preview asks the server (`POST /bookings/:id/refund-preview`) and falls back to the domain preview, with the extras charged at completion included, when that endpoint can't be reached. The server remains the source of truth, and the booking page shows a warning if the server's quote doesn't match the preview.
+- **Policy versions**: the active policy (pricing page, new quotes) is the highest version whose `effective_from` has passed, the same rule as the API, so a version published for a future date never shows early.
 
 ## Pages
 
@@ -72,18 +74,25 @@ For example, Tara for 2 hours is a $90.00 subtotal plus a $13.50 service fee (15
 
 ## Scripts
 
-| Script                           | Does                                      |
-| -------------------------------- | ----------------------------------------- |
-| `npm run dev`                    | Vite dev server                           |
-| `npm run build`                  | Typecheck and production build to `dist/` |
-| `npm run preview`                | Serve the build                           |
-| `npm run typecheck`              | `tsc -b --noEmit`                         |
-| `npm test` / `npm run test:unit` | Vitest unit tests for the money domain    |
-| `npm run test:e2e`               | Playwright tests                          |
+| Script                            | Does                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------ |
+| `npm run dev`                     | Vite dev server                                                                      |
+| `npm run build`                   | Typecheck and production build to `dist/`                                            |
+| `npm run preview`                 | Serve the build                                                                      |
+| `npm run lint`                    | ESLint, zero warnings allowed                                                        |
+| `npm run format` / `format:write` | Prettier check / write                                                               |
+| `npm run typecheck`               | `tsc --noEmit`                                                                       |
+| `npm test` / `npm run test:unit`  | Vitest unit tests for the money domain                                               |
+| `npm run test:coverage`           | Unit tests with v8 coverage                                                          |
+| `npm run test:api`                | API tests (`tests/api`) against `SUPABASE_URL` + `SUPABASE_ANON_KEY` (fake payments) |
+| `npm run test:e2e`                | Playwright tests                                                                     |
+| `npm run db:check`                | Database invariants (`scripts/ci/db_checks.sql`) against the local stack             |
+| `npm run check:functions`         | `deno check` for the Edge Functions                                                  |
+| `npm run bundle:functions`        | One-file bundles of the Edge Functions (for single-file deploy tools)                |
 
 ### E2E tests
 
-- `e2e/ui.spec.ts` runs against a mocked Supabase and API (`e2e/mock-backend.ts`), so it needs no backend. It covers sign-in, role-based navigation, the Tara 2h quote, booking with a points and card split, promo codes, the cancel preview at every tier, the tip cap message, tasker accept and complete with extras, the pending-tasker banner, the pricing curve, and the agent refund approval.
+- `e2e/ui.spec.ts` runs against a mocked Supabase and API (`e2e/mock-backend.ts`), so it needs no backend. It covers sign-in, role-based navigation, the Tara 2h quote, booking with a points and card split, promo codes, the cancel preview at every tier, the tip cap message (including tips already paid), tasker accept and complete with extras, the pending-tasker banner, the pricing curve, the agent refund approval, public display names, the server refund preview for a booking with extras and its browser fallback, `409 busy` retries with the same Idempotency-Key, client refund requests, dispute status on bookings, and a future policy version that must not be active yet.
 - `e2e/backend.spec.ts` runs against the real project and is skipped unless `E2E_BACKEND=1`.
 
 ## Repo layout
