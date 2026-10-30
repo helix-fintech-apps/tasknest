@@ -17,83 +17,13 @@ import {
 } from "../_shared/http.ts";
 import { Db, env, serviceClient, userClient } from "../_shared/db.ts";
 import { PaymentError, PaymentsProvider, selectProvider } from "../_shared/provider/index.ts";
-import { handleStripeWebhook } from "../_shared/stripe-webhook.ts";
+import { handleStripeWebhook } from "../_shared/webhooks/index.ts";
 import { Caller, Ctx, Role } from "./context.ts";
 import { verifyTestClockToken } from "./test-clock.ts";
-import * as bookings from "./handlers/bookings.ts";
-import * as money from "./handlers/money.ts";
-import * as admin from "./handlers/admin.ts";
+import { routes } from "./routes.ts";
+import type { Route } from "./route.ts";
 
 export const BUILD = "tasknest-api 2026-09-24.3";
-
-type Handler = (ctx: Ctx) => Promise<unknown>;
-interface Route {
-  method: "GET" | "POST";
-  pattern: RegExp;
-  handler: Handler;
-  /** Stores the response under the caller's Idempotency-Key (mutations). */
-  idempotent: boolean;
-}
-
-const ID = "([0-9a-fA-F-]{36})";
-const booking = (action: string) => new RegExp(`^/bookings/${ID}/${action}$`);
-const routes: Route[] = [
-  { method: "POST", pattern: /^\/quote$/, handler: bookings.quoteHandler, idempotent: false },
-  { method: "POST", pattern: /^\/bookings$/, handler: bookings.createBooking, idempotent: true },
-  { method: "POST", pattern: booking("accept"), handler: bookings.accept, idempotent: true },
-  { method: "POST", pattern: booking("decline"), handler: bookings.decline, idempotent: true },
-  {
-    method: "POST",
-    pattern: booking("reschedule"),
-    handler: bookings.reschedule,
-    idempotent: true,
-  },
-  {
-    method: "GET",
-    pattern: booking("cancel-preview"),
-    handler: bookings.cancelPreview,
-    idempotent: false,
-  },
-  { method: "POST", pattern: booking("cancel"), handler: bookings.cancel, idempotent: true },
-  { method: "POST", pattern: booking("no-show"), handler: bookings.noShow, idempotent: true },
-  { method: "POST", pattern: booking("start"), handler: bookings.start, idempotent: true },
-  { method: "POST", pattern: booking("complete"), handler: bookings.complete, idempotent: true },
-  { method: "POST", pattern: booking("tip"), handler: money.tip, idempotent: true },
-  {
-    method: "POST",
-    pattern: booking("refund-preview"),
-    handler: money.refundPreview,
-    idempotent: false,
-  },
-  { method: "POST", pattern: booking("refund"), handler: money.refund, idempotent: true },
-  { method: "POST", pattern: booking("review"), handler: money.review, idempotent: true },
-  { method: "POST", pattern: /^\/payouts\/run$/, handler: admin.runPayouts, idempotent: true },
-  {
-    method: "POST",
-    pattern: new RegExp(`^/admin/taskers/${ID}/status$`),
-    handler: admin.setTaskerStatus,
-    idempotent: true,
-  },
-  {
-    method: "POST",
-    pattern: /^\/admin\/policies$/,
-    handler: admin.publishPolicy,
-    idempotent: true,
-  },
-  {
-    method: "POST",
-    pattern: /^\/admin\/disputes\/simulate$/,
-    handler: admin.simulateDispute,
-    idempotent: true,
-  },
-  {
-    method: "POST",
-    pattern: /^\/admin\/points\/grant$/,
-    handler: admin.grantPoints,
-    idempotent: true,
-  },
-  { method: "POST", pattern: /^\/admin\/test-clock$/, handler: admin.testClock, idempotent: false },
-];
 
 let providerSingleton: PaymentsProvider | null = null;
 function provider(): PaymentsProvider {
@@ -111,9 +41,12 @@ function provider(): PaymentsProvider {
   return providerSingleton;
 }
 
-/** Scheduled jobs (cron) call with the function's own service-role key; they may only run payouts. */
+/** Scheduled jobs (cron) call with the function's own service-role key; they may only run payouts and jobs. */
 const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
 const SYSTEM_ROUTES = new Set(["/payouts/run"]);
+const SYSTEM_ROUTE_PREFIXES = ["/jobs/"];
+const isSystemRoute = (path: string) =>
+  SYSTEM_ROUTES.has(path) || SYSTEM_ROUTE_PREFIXES.some((p) => path.startsWith(p));
 
 /** Strip the function prefix: "/api/bookings" or "/functions/v1/api/bookings" -> "/bookings". */
 export function routePath(pathname: string): string {
@@ -302,9 +235,9 @@ export async function handle(req: Request): Promise<Response> {
   let errorCode: string | undefined;
   try {
     const { route, match } = findRoute(req.method, path);
-    const reqBody = req.method === "POST" ? await readJson(req) : {};
+    const reqBody = req.method === "POST" || req.method === "PUT" ? await readJson(req) : {};
     const caller = await authenticate(req, db);
-    if (caller.system && !SYSTEM_ROUTES.has(path)) {
+    if (caller.system && !isSystemRoute(path)) {
       throw new HttpError(403, "forbidden", "the service key may only call /payouts/run");
     }
     userId = caller.id;
@@ -312,10 +245,16 @@ export async function handle(req: Request): Promise<Response> {
     const { now, testNow } = await requestClock(req, prov, caller.id);
 
     const params: Record<string, string> = {};
-    if (match[1]) {
-      if (!UUID_RE.test(match[1])) throw new HttpError(400, "bad_request", "id must be a uuid");
-      params.id = match[1].toLowerCase();
-    }
+    (route.params ?? ["id"]).forEach((name, i) => {
+      const value = match[i + 1];
+      if (!value) return;
+      if (name === "id" || name.endsWith("Id")) {
+        if (!UUID_RE.test(value)) throw new HttpError(400, "bad_request", `${name} must be a uuid`);
+        params[name] = value.toLowerCase();
+      } else {
+        params[name] = value;
+      }
+    });
 
     idemKey = route.idempotent ? (req.headers.get("Idempotency-Key") ?? undefined) : undefined;
     if (idemKey !== undefined && (idemKey.length < 8 || idemKey.length > 200)) {

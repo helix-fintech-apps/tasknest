@@ -4,7 +4,7 @@
 
 import { corsHeaders, errorBody, json, toHttpError } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/db.ts";
-import { handleStripeWebhook } from "../_shared/stripe-webhook.ts";
+import { handleStripeWebhook } from "../_shared/webhooks/index.ts";
 
 async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });

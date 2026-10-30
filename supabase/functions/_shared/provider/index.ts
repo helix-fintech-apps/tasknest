@@ -2,13 +2,18 @@
 //   PAYMENTS_PROVIDER=fake|stripe (optional). Default: stripe when STRIPE_SECRET_KEY is a test key, else fake.
 //   A live key (sk_live_...) is always refused.
 
-import { FakeProvider } from "./fake.ts";
-import { StripeProvider } from "./stripe.ts";
+import { FakeProvider } from "./fake/index.ts";
+import { StripeProvider } from "./stripe/index.ts";
 import { PaymentsProvider } from "./types.ts";
 
 export * from "./types.ts";
-export { FakeProvider, FAKE_DECLINE_PM } from "./fake.ts";
-export { StripeProvider, verifyStripeSignature, hmacSha256Hex, formEncode } from "./stripe.ts";
+export { FakeProvider, FAKE_DECLINE_PM } from "./fake/index.ts";
+export {
+  StripeProvider,
+  verifyStripeSignature,
+  hmacSha256Hex,
+  formEncode,
+} from "./stripe/index.ts";
 
 export function selectProvider(env: {
   PAYMENTS_PROVIDER?: string;
