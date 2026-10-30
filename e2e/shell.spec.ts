@@ -348,7 +348,8 @@ test.describe("UI kit (the /design-system page)", () => {
   test("the combobox filters as you type and selects with the keyboard", async ({ page }) => {
     const box = page.getByRole("combobox", { name: "Category" });
     await box.fill("mov");
-    await expect(page.getByRole("option")).toHaveCount(1);
+    const list = page.getByRole("listbox", { name: "Category" });
+    await expect(list.getByRole("option")).toHaveCount(1);
     await box.press("Enter");
     await expect(box).toHaveValue("Moving");
   });

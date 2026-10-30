@@ -136,7 +136,7 @@ function BookingsTab({
   );
   const sel = rows.find((x) => x.booking.id === selected) ?? null;
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_26rem]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
       <div>
         <form
           className="mb-4 flex flex-wrap gap-2"
@@ -175,7 +175,7 @@ function BookingsTab({
         ) : !rows.length ? (
           <Empty>No bookings found.</Empty>
         ) : (
-          <Card className="!p-0 overflow-x-auto">
+          <Card className="!p-0 overflow-x-auto" role="region" aria-label="Bookings" tabIndex={0}>
             <table data-testid="console-bookings">
               <thead>
                 <tr>
@@ -603,7 +603,7 @@ function TaskersTab({ isAdmin }: { isAdmin: boolean }) {
       {loading ? (
         <Spinner />
       ) : (
-        <Card className="!p-0 overflow-x-auto">
+        <Card className="!p-0 overflow-x-auto" role="region" aria-label="Taskers" tabIndex={0}>
           <table data-testid="console-taskers">
             <thead>
               <tr>
@@ -703,6 +703,8 @@ function PayoutsTab() {
         {result !== null && (
           <pre
             data-testid="payout-result"
+            tabIndex={0}
+            aria-label="Payout run result"
             className="mt-3 max-h-64 overflow-auto rounded-lg bg-slate-50 p-3 text-xs"
           >
             {JSON.stringify(result, null, 2)}
