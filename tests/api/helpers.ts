@@ -315,3 +315,79 @@ export function net(lines: LedgerLine[], account: string, party?: string, unit =
 
 export const kinds = (lines: LedgerLine[]) =>
   [...new Set(lines.map((l) => l.ledger_txns.kind))].sort();
+
+// ---- Signed-out visitors and the service role (added with WS7-b) ---------------------------------------------
+
+/** A signed-out visitor: the browser client sends the project's anon key as the bearer token. */
+export function apiAnon(
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {},
+): Promise<ApiResult> {
+  return call(
+    method,
+    path,
+    {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+      "content-type": "application/json",
+      ...headers,
+    },
+    body,
+  );
+}
+
+/** PostgREST with the service-role key (bypasses RLS). Fixtures only; skip the test when the key is absent. */
+export async function svc<T = Json>(
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  table: string,
+  query = "",
+  body?: unknown,
+): Promise<T[]> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query ? `?${query}` : ""}`, {
+    method,
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+      "content-type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`svc ${method} ${table} ${res.status}: ${await res.text()}`);
+  const text = await res.text();
+  return (text ? JSON.parse(text) : []) as T[];
+}
+
+/** Run a job (system only: the service-role key), optionally at a test-clock time. */
+export async function runJob(name: string, body: unknown = {}, now?: Date): Promise<ApiResult> {
+  const headers: Record<string, string> = {
+    apikey: ANON_KEY,
+    Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+    "content-type": "application/json",
+  };
+  if (now) {
+    // The clock token is minted for the caller the service key maps to (the all-zero system user).
+    const minted = await api("admin", "POST", "/admin/test-clock", {
+      userId: "00000000-0000-0000-0000-000000000000",
+      ttlSeconds: 600,
+    });
+    if (minted.status !== 200) throw new Error(`clock token: ${JSON.stringify(minted.body)}`);
+    headers["x-test-now"] = now.toISOString();
+    headers["x-test-clock"] = minted.body.token as string;
+  }
+  return call("POST", `/jobs/${name}`, headers, body);
+}
+
+/** A slot at an exact UTC date and time ("2026-12-07T17:00"), booked in UTC. */
+export function slotAt(utcLocal: string): Slot {
+  return { startAt: new Date(`${utcLocal}:00Z`), localStart: utcLocal, tz: "UTC" };
+}
+
+/** The next given weekday (0 = Sunday) at least `minDaysAhead` days from now, as "YYYY-MM-DD" (UTC date). */
+export function nextWeekday(weekday: number, minDaysAhead = 25): string {
+  const d = new Date(Date.now() + minDaysAhead * DAY);
+  while (d.getUTCDay() !== weekday) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}

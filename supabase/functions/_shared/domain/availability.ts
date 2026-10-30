@@ -89,6 +89,14 @@ export function dayWindows(
   return merge(ws);
 }
 
+/**
+ * A tasker with no weekly schedule, and no override on that date, is open around the clock (the legacy
+ * behaviour), so a task may run past midnight. Once a tasker sets a schedule, windows end at midnight.
+ */
+function isOpenDay(date: string, rules: AvailabilityRule[], overrides: AvailabilityOverride[]) {
+  return rules.length === 0 && !overrides.some((o) => o.date === date);
+}
+
 export interface SlotQuery {
   tz: string;
   fromDate: string; // first local date, YYYY-MM-DD
@@ -118,6 +126,7 @@ export function daySlots(q: SlotQuery): DaySlots[] {
   for (let i = 0; i < q.days; i++) {
     const date = addLocalDays(q.fromDate, i);
     const slots: Slot[] = [];
+    const open = isOpenDay(date, q.rules, q.overrides);
     for (const w of dayWindows(date, q.rules, q.overrides)) {
       const first = Math.ceil(w.start / step) * step;
       for (let t = first; t < w.end && t < DAY_MINUTES; t += step) {
@@ -127,7 +136,7 @@ export function daySlots(q: SlotQuery): DaySlots[] {
         const startAt = localToUtc(start, q.tz);
         const endAt = new Date(startAt.getTime() + q.minutes * 60_000);
         let status: SlotStatus;
-        if (t + q.minutes > w.end || startAt.getTime() < q.now.getTime() + lead) {
+        if ((!open && t + q.minutes > w.end) || startAt.getTime() < q.now.getTime() + lead) {
           status = "unavailable";
         } else if (q.busy.some((b) => b.startAt < endAt && b.endAt > startAt)) {
           status = "taken";
@@ -151,6 +160,7 @@ export function fitsSchedule(
   overrides: AvailabilityOverride[],
 ): boolean {
   const { date, minuteOfDay } = localParts(startAt, tz);
+  if (isOpenDay(date, rules, overrides)) return true;
   return dayWindows(date, rules, overrides).some(
     (w) => minuteOfDay >= w.start && minuteOfDay + minutes <= w.end,
   );

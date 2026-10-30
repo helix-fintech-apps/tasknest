@@ -23,7 +23,7 @@ import { verifyTestClockToken } from "./test-clock.ts";
 import { routes } from "./routes.ts";
 import type { Route } from "./route.ts";
 
-export const BUILD = "tasknest-api 2026-09-24.3";
+export const BUILD = "tasknest-api 2026-11-01.1";
 
 let providerSingleton: PaymentsProvider | null = null;
 function provider(): PaymentsProvider {
@@ -48,6 +48,22 @@ const SYSTEM_ROUTE_PREFIXES = ["/jobs/"];
 const isSystemRoute = (path: string) =>
   SYSTEM_ROUTES.has(path) || SYSTEM_ROUTE_PREFIXES.some((p) => path.startsWith(p));
 
+/**
+ * Feature flags the frontend reads (src/lib/flags.ts). Wave-2 features ship dark: set the FEATURES secret to a
+ * comma list (for example "chat,help_articles") to switch them on. `availability` is on by default.
+ */
+export function features(): Record<string, boolean> {
+  const on = new Set(
+    (env("FEATURES") ?? "availability")
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean),
+  );
+  return Object.fromEntries(
+    ["chat", "availability", "dispute_evidence", "help_articles"].map((f) => [f, on.has(f)]),
+  );
+}
+
 /** Strip the function prefix: "/api/bookings" or "/functions/v1/api/bookings" -> "/bookings". */
 export function routePath(pathname: string): string {
   const m = pathname.match(/^(?:\/functions\/v1)?\/api(\/.*)?$/);
@@ -55,10 +71,22 @@ export function routePath(pathname: string): string {
   return p.length > 1 ? p.replace(/\/+$/, "") : p;
 }
 
-async function authenticate(req: Request, db: Db): Promise<Caller> {
+/** A signed-out visitor. Not a user: it owns nothing and may only call routes marked `public`. */
+const ANON_USER_ID = "00000000-0000-0000-0000-0000000000a0";
+const anonCaller = (): Caller => ({
+  id: ANON_USER_ID,
+  email: "",
+  role: "anon",
+  emailConfirmed: false,
+});
+
+async function authenticate(req: Request, db: Db, allowAnon: boolean): Promise<Caller> {
   const auth = req.headers.get("Authorization") ?? "";
   const token = auth.replace(/^Bearer\s+/i, "");
   if (!token) throw new HttpError(401, "unauthorized", "missing Authorization bearer token");
+  // A signed-out visitor presents the project's anon key (what the browser client sends); no token at all is
+  // still a 401, so a public route is never reachable by a bare request.
+  if (allowAnon && token === env("SUPABASE_ANON_KEY")) return anonCaller();
   const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
   if (serviceKey && token === serviceKey) {
     return {
@@ -225,7 +253,13 @@ export async function handle(req: Request): Promise<Response> {
     } catch (e) {
       providerName = `error: ${(e as Error).message}`;
     }
-    return json({ ok: true, service: "tasknest-api", build: BUILD, provider: providerName });
+    return json({
+      ok: true,
+      service: "tasknest-api",
+      build: BUILD,
+      provider: providerName,
+      features: features(),
+    });
   }
 
   let userId = "";
@@ -236,9 +270,16 @@ export async function handle(req: Request): Promise<Response> {
   try {
     const { route, match } = findRoute(req.method, path);
     const reqBody = req.method === "POST" || req.method === "PUT" ? await readJson(req) : {};
-    const caller = await authenticate(req, db);
+    const caller = await authenticate(req, db, route.public === true);
+    if (caller.role === "anon" && route.public !== true) {
+      throw new HttpError(401, "unauthorized", "sign in to use this");
+    }
     if (caller.system && !isSystemRoute(path)) {
-      throw new HttpError(403, "forbidden", "the service key may only call /payouts/run");
+      throw new HttpError(
+        403,
+        "forbidden",
+        "the service key may only call /payouts/run and /jobs/*",
+      );
     }
     userId = caller.id;
     const prov = provider();
@@ -277,6 +318,9 @@ export async function handle(req: Request): Promise<Response> {
       idemKey,
       body: reqBody,
       params,
+      query: Object.fromEntries(
+        [...url.searchParams.keys()].map((k) => [k, url.searchParams.get(k)!]),
+      ),
       opKey: idemKey ? `req:${userId}:${idemKey}` : `op:${crypto.randomUUID()}`,
     };
     body = await route.handler(ctx);

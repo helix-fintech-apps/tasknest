@@ -1,6 +1,7 @@
 // Tips, refunds (and their preview) and reviews.
 
 import {
+  addDays,
   clawbackPoints,
   MoneyPolicy,
   partsTotal,
@@ -8,6 +9,8 @@ import {
   RefundKind,
   RefundPlan,
   Tender,
+  tipLimits,
+  TipLimits,
   validateTip,
 } from "../../_shared/domain/index.ts";
 import {
@@ -20,68 +23,223 @@ import {
   UnitOfWork,
   withLocks,
 } from "../../_shared/db.ts";
-import { HttpError, optString, pgToHttp, reqInt, reqString, UUID_RE } from "../../_shared/http.ts";
-import { pointsIssueTxn, refundTxn, tipTxn } from "../../_shared/postings.ts";
+import {
+  HttpError,
+  optInt,
+  optString,
+  pgToHttp,
+  reqInt,
+  reqString,
+  UUID_RE,
+} from "../../_shared/http.ts";
+import { pointsIssueTxn, refundTxn, tipRefundTxn, tipTxn } from "../../_shared/postings.ts";
+import { notify } from "../../_shared/notify.ts";
+import { chargeTip } from "../../_shared/holds.ts";
+import { PaymentError } from "../../_shared/provider/index.ts";
 import * as pts from "../../_shared/points-store.ts";
 import { bookingFigures, Ctx, requireParty } from "../context.ts";
-import { bookingResponse, onBooking } from "./bookings.ts";
+import { bookingResponse, loadClientCard, onBooking, recordBalanceTxn } from "./bookings.ts";
 
 // ---- POST /bookings/:id/tip ---------------------------------------------------------------------
+
+interface TipCheckResult {
+  amount: number;
+  tender: Tender;
+  tippedBefore: number;
+  taskerGets: number;
+  platformFee: number;
+  limits: TipLimits;
+}
+
+/** The tip rules, shared by POST /tip and POST /tip-preview (the preview reports the first problem instead). */
+async function checkTip(
+  ctx: Ctx,
+  b: BookingRow,
+  policy: MoneyPolicy,
+  amount: number,
+  tender: Tender,
+): Promise<TipCheckResult> {
+  if (b.status !== "completed") {
+    throw new HttpError(422, "rule_violation", "tips are allowed only after the task is completed");
+  }
+  const completedAt = b.completed_at ? new Date(b.completed_at) : null;
+  const subtotal = Number(b.subtotal_cents);
+  const check = validateTip(amount, tender, subtotal, completedAt, ctx.now, policy);
+  // The cap applies to all tips on the booking together, not to each tip.
+  const { data: prior, error } = await ctx.db
+    .from("tips")
+    .select("amount_cents")
+    .eq("booking_id", b.id);
+  if (error) throw pgToHttp(error);
+  const tippedBefore = (prior ?? []).reduce((a, t) => a + Number(t.amount_cents), 0);
+  if (tippedBefore > 0)
+    validateTip(tippedBefore + amount, tender, subtotal, completedAt, ctx.now, policy);
+  return {
+    amount,
+    tender,
+    tippedBefore,
+    taskerGets: check.taskerGets,
+    platformFee: check.platformFee,
+    limits: tipLimits(subtotal, tippedBefore, policy),
+  };
+}
 
 export function tip(ctx: Ctx) {
   return onBooking(ctx, async (b) => {
     requireParty(ctx, b, "client");
     const amount = reqInt(ctx.body, "amountCents", 1);
     const tender = (optString(ctx.body, "tender") ?? "card") as Tender;
-    if (b.status !== "completed") {
-      throw new HttpError(
-        422,
-        "rule_violation",
-        "tips are allowed only after the task is completed",
-      );
-    }
     const policy = await loadPolicy(ctx.db, b.policy_version);
-    const completedAt = b.completed_at ? new Date(b.completed_at) : null;
-    const subtotal = Number(b.subtotal_cents);
-    const check = validateTip(amount, tender, subtotal, completedAt, ctx.now, policy);
-    // The cap applies to all tips on the booking together, not to each tip.
-    const { data: prior, error } = await ctx.db
-      .from("tips")
-      .select("amount_cents")
-      .eq("booking_id", b.id);
-    if (error) throw pgToHttp(error);
-    const tippedBefore = (prior ?? []).reduce((a, t) => a + Number(t.amount_cents), 0);
-    if (tippedBefore > 0)
-      validateTip(tippedBefore + amount, tender, subtotal, completedAt, ctx.now, policy);
+    const c = await checkTip(ctx, b, policy, amount, tender);
 
-    const pi = await ctx.provider.charge({
+    // The booking's saved card by default; the client may pick another saved card.
+    const client = await loadClientCard(ctx.db, b.client_id);
+    const moved = await chargeTip(ctx.provider, {
       amountCents: amount,
       bookingId: b.id,
-      description: `TaskNest tip ${b.id}`,
+      customerId: b.stripe_customer_id ?? client.customerId,
+      paymentMethodId:
+        optString(ctx.body, "paymentMethodId") ?? b.payment_method_id ?? client.defaultMethodId,
+      legacyMethod: optString(ctx.body, "paymentMethod"),
       idempotencyKey: `${ctx.opKey}:tip`,
-      kind: "tip",
-      paymentMethod: optString(ctx.body, "paymentMethod"),
     });
+    if (moved.status === "requires_action") {
+      // A tip that needs 3DS has no pending state in the contract yet, so nothing is recorded and the client
+      // is told to use another card. (Handed to WS4/WS3 in docs/contracts.md.)
+      throw new PaymentError(
+        "authentication_required",
+        "Your bank needs you to approve this tip. Try another card.",
+        402,
+      );
+    }
     const tipId = crypto.randomUUID();
     const uow = new UnitOfWork(ctx.idemKey ? ctx.opKey : undefined);
     uow.insert("tips", {
       id: tipId,
       booking_id: b.id,
       amount_cents: amount,
-      platform_fee_cents: check.platformFee,
-      stripe_payment_intent_id: pi.id,
+      platform_fee_cents: c.platformFee,
+      stripe_payment_intent_id: moved.intentId,
+      stripe_charge_id: moved.chargeId ?? null,
     });
-    uow.ledger(tipTxn(b.id, b.tasker_id, check.taskerGets), tipId);
+    uow.insert("payment_intents", {
+      id: moved.intentId,
+      booking_id: b.id,
+      kind: "tip",
+      amount_cents: amount,
+      status: "succeeded",
+      charge_id: moved.chargeId ?? null,
+      created_at: ctx.now.toISOString(),
+    });
+    recordBalanceTxn(uow, b.id, moved);
+    uow.ledger(tipTxn(b.id, b.tasker_id, c.taskerGets), tipId);
+    notify(uow, {
+      userId: b.tasker_id,
+      kind: "tip_received",
+      bookingId: b.id,
+      title: "You received a tip",
+      body: "The whole tip is yours.",
+    });
     await uow.commit(ctx.db);
     return {
       tip: {
         id: tipId,
         amountCents: amount,
-        taskerGets: check.taskerGets,
-        platformFee: check.platformFee,
-        paymentIntentId: pi.id,
-        tippedTotalCents: tippedBefore + amount,
+        taskerGets: c.taskerGets,
+        platformFee: c.platformFee,
+        paymentIntentId: moved.intentId,
+        tippedTotalCents: c.tippedBefore + amount,
       },
+    };
+  });
+}
+
+// ---- POST /bookings/:id/tip-preview (no side effects) --------------------------------------------------
+
+export async function tipPreview(ctx: Ctx) {
+  const b = await loadBooking(ctx.db, ctx.params.id);
+  requireParty(ctx, b, "client");
+  const policy = await loadPolicy(ctx.db, b.policy_version);
+  const amount = optInt(ctx.body, "amountCents", 1);
+  const { data: prior, error } = await ctx.db
+    .from("tips")
+    .select("amount_cents")
+    .eq("booking_id", b.id);
+  if (error) throw pgToHttp(error);
+  const tippedBefore = (prior ?? []).reduce((a, t) => a + Number(t.amount_cents), 0);
+  const limits = tipLimits(Number(b.subtotal_cents), tippedBefore, policy);
+  let problem: string | undefined;
+  if (b.status !== "completed") problem = "tips are allowed only after the task is completed";
+  else if (amount !== undefined) {
+    try {
+      await checkTip(ctx, b, policy, amount, "card");
+    } catch (e) {
+      problem = e instanceof HttpError ? e.message : (e as Error).message;
+    }
+  }
+  const completedAt = b.completed_at ? new Date(b.completed_at) : null;
+  const client = await loadClientCard(ctx.db, b.client_id);
+  return {
+    capCents: limits.capCents,
+    minCents: limits.minCents,
+    alreadyTippedCents: limits.alreadyTippedCents,
+    roomCents: limits.roomCents,
+    windowEndsAt: completedAt ? addDays(completedAt, policy.tips.windowDays).toISOString() : null,
+    paymentMethodId: b.payment_method_id ?? client.defaultMethodId,
+    policyVersion: policy.version,
+    ...(problem ? { problem } : {}),
+  };
+}
+
+// ---- POST /bookings/:id/tips/:tipId/refund (support, admin) --------------------------------------------
+
+// Tips are not part of what a client can ask to have refunded; staff can refund one in full. The whole tip
+// comes back from the tasker (tips pass through 100%).
+export function tipRefund(ctx: Ctx) {
+  return onBooking(ctx, async (b) => {
+    requireParty(ctx, b, "staff");
+    const reason = reqString(ctx.body, "reason").trim();
+    const { data: tipRow, error } = await ctx.db
+      .from("tips")
+      .select("*")
+      .eq("id", ctx.params.tipId)
+      .eq("booking_id", b.id)
+      .maybeSingle();
+    if (error) throw pgToHttp(error);
+    if (!tipRow) throw new HttpError(404, "not_found", "tip not found");
+    const left = Number(tipRow.amount_cents) - Number(tipRow.refunded_cents);
+    if (left <= 0) throw new HttpError(409, "already_refunded", "this tip was already refunded");
+    if (!tipRow.stripe_payment_intent_id)
+      throw new HttpError(409, "provider_mismatch", "this tip has no card payment to refund");
+    const refundId = await ctx.provider.refund(
+      tipRow.stripe_payment_intent_id as string,
+      left,
+      `${ctx.opKey}:tip-refund`,
+    );
+    const uow = new UnitOfWork(ctx.idemKey ? ctx.opKey : undefined);
+    uow.inc("tips", { id: tipRow.id }, "refunded_cents", left);
+    uow.ledger(tipRefundTxn(b.id, b.tasker_id, left), tipRow.id);
+    uow.audit(ctx.user.id, "tip_refunded", "booking", b.id, reason, {
+      tipId: tipRow.id,
+      amountCents: left,
+      providerRefundId: refundId.id,
+    });
+    notify(uow, {
+      userId: b.tasker_id,
+      kind: "tip_refunded",
+      bookingId: b.id,
+      title: "A tip was refunded",
+      body: reason,
+    });
+    await uow.commit(ctx.db);
+    return {
+      tip: {
+        id: tipRow.id,
+        amountCents: Number(tipRow.amount_cents),
+        refundedCents: Number(tipRow.amount_cents),
+      },
+      refundedCents: left,
+      providerRefundId: refundId.id,
     };
   });
 }

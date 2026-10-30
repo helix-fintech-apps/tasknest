@@ -157,7 +157,9 @@ describe.skipIf(!LIVE)("TaskNest API money flows (fake provider)", () => {
         amount_cents: 1000,
         points: 1000,
       });
-      expect(b.body.booking.stripe_payment_intent_id).toMatch(/^pi_fake_/);
+      // Policy v2: a task this far out saves the card and places the hold later (plan 8.3), so there is no
+      // PaymentIntent yet. The money-v2 tests cover both plans.
+      expect(["hold_active", "card_saved"]).toContain(b.body.payment.state);
       expect(await availablePoints("ava")).toBe(before - 1000);
       const reserve = await rest("ava", "points_movements", `booking_id=eq.${id}&kind=eq.reserve`);
       expect(reserve.reduce((a: number, m: Json) => a + m.points, 0)).toBe(-1000);

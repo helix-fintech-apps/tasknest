@@ -10,6 +10,8 @@ export interface Route {
   handler: Handler;
   /** Stores the response under the caller's Idempotency-Key (mutations). */
   idempotent: boolean;
+  /** Open to signed-out visitors (the anon key, or no token). Read-only discovery routes only. */
+  public?: boolean;
   /**
    * Names of the pattern's capture groups, in order (default `["id"]`). Values are exposed as
    * `ctx.params[name]`. A name that is `id` or ends in `Id` must be a uuid (400 otherwise) and is lowercased.

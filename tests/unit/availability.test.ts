@@ -121,8 +121,15 @@ describe("fitsSchedule (what POST /bookings checks)", () => {
     expect(fitsSchedule(new Date("2026-11-01T18:00:00Z"), 60, TZ, weekdays, [])).toBe(false); // Sunday
   });
 
-  it("is always true for a tasker with no schedule", () => {
+  it("is always true for a tasker with no schedule, even for a task that runs past midnight", () => {
     expect(fitsSchedule(new Date("2026-11-01T11:00:00Z"), 600, TZ, [], [])).toBe(true);
+    const lateNight = new Date("2026-11-02T06:30:00Z"); // 23:30 PDT/PST the evening before
+    expect(fitsSchedule(lateNight, 180, TZ, [], [])).toBe(true);
+    // ...but a date with a block override is a scheduled date: windows end at midnight
+    const ov: AvailabilityOverride[] = [
+      { date: "2026-11-01", kind: "block", startMinute: 0, endMinute: 60 },
+    ];
+    expect(fitsSchedule(lateNight, 180, TZ, [], ov)).toBe(false);
   });
 });
 

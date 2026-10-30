@@ -4,7 +4,8 @@ import { HttpError } from "../_shared/http.ts";
 import { BookingStatus, canTransition } from "../_shared/domain/index.ts";
 export { bookingFigures } from "../_shared/figures.ts";
 
-export type Role = "client" | "tasker" | "admin" | "support_agent";
+/** `anon` is a signed-out visitor (anon key or no token): only routes marked `public` accept it. */
+export type Role = "client" | "tasker" | "admin" | "support_agent" | "anon";
 
 export interface Caller {
   id: string;
@@ -26,6 +27,8 @@ export interface Ctx {
   opKey: string;
   body: Record<string, unknown>;
   params: Record<string, string>;
+  /** Query string parameters (first value of each). */
+  query: Record<string, string>;
 }
 
 export function requireRole(ctx: Ctx, ...roles: Role[]): void {

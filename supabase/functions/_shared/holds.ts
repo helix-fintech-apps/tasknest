@@ -24,6 +24,7 @@ export interface Moved {
   chargeId?: string;
   captureBefore?: string;
   clientSecret?: string;
+  paymentMethodId?: string;
   balanceTxn?: BalanceTxn;
 }
 
@@ -36,6 +37,7 @@ function fromIntent(r: IntentResult): Moved {
     chargeId: r.chargeId,
     captureBefore: r.captureBefore,
     clientSecret: r.clientSecret,
+    paymentMethodId: r.paymentMethodId,
     balanceTxn: r.balanceTxn,
   };
 }
@@ -91,8 +93,6 @@ export async function placeHold(provider: PaymentsProvider, i: HoldInput): Promi
     throw new PaymentError("payment_method_required", "a payment method is required", 422);
   if (payment.kind === "saved_method") assertMethodFitsProvider(provider, payment.paymentMethodId);
   try {
-    if (!i.customerId && provider.name === "stripe")
-      throw new PaymentError("customer_required", "no customer for this payment", 500);
     const r = await provider.holdOnSession({
       amountCents: i.amountCents,
       customerId: i.customerId ?? "",
@@ -112,6 +112,59 @@ export async function placeHold(provider: PaymentsProvider, i: HoldInput): Promi
     });
     return { intentId: r.id, status: "requires_capture" };
   }
+}
+
+// ---- Saving a card for a later hold ---------------------------------------------------------------
+
+export interface SaveCardInput {
+  customerId: string | null;
+  /** The new-contract payment input from the request, if any. */
+  payment: PaymentInput | null;
+  /** The saved method to rely on when no new card is given. */
+  savedMethodId: string | null;
+  idempotencyKey: string;
+}
+
+export interface SavedCard {
+  paymentMethodId: string | null;
+  setupIntentId?: string;
+  /** The card needs an extra step (3DS on the SetupIntent). */
+  requiresAction: boolean;
+  clientSecret?: string;
+}
+
+/**
+ * `save_card_hold_later`: the hold comes later, so now only a usable card is needed. A card already on file is
+ * used as is; a new card (confirmation token or simulated token) is saved with a SetupIntent.
+ */
+export async function saveCard(provider: PaymentsProvider, i: SaveCardInput): Promise<SavedCard> {
+  if (i.payment && i.payment.kind !== "saved_method") {
+    const r = await provider.setupOnSession({
+      customerId: i.customerId ?? "",
+      payment: i.payment,
+      idempotencyKey: i.idempotencyKey,
+    });
+    if (r.status === "requires_action") {
+      return {
+        paymentMethodId: r.paymentMethodId ?? null,
+        setupIntentId: r.setupIntentId,
+        requiresAction: true,
+        clientSecret: r.clientSecret,
+      };
+    }
+    if (r.status !== "succeeded" || !r.paymentMethodId) {
+      throw new PaymentError("card_declined", "Your card could not be saved.");
+    }
+    return {
+      paymentMethodId: r.paymentMethodId,
+      setupIntentId: r.setupIntentId,
+      requiresAction: false,
+    };
+  }
+  const id = i.payment?.kind === "saved_method" ? i.payment.paymentMethodId : i.savedMethodId;
+  if (!id) throw new PaymentError("payment_method_required", "a payment method is required", 422);
+  assertMethodFitsProvider(provider, id);
+  return { paymentMethodId: id, requiresAction: false };
 }
 
 // ---- Charging a saved card with no live hold ------------------------------------------------------
