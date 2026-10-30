@@ -12,6 +12,7 @@ HTTP -> api/index.ts: route, auth (JWT -> profile role), test clock, Idempotency
         (booking/tender/points/refund rows + every ledger txn + audit rows)
 ```
 
+- **Where the code lives.** `api/index.ts` is the dispatcher (auth, idempotency, test clock); the route table is `api/routes.ts` plus one file per area in `api/routes/`; handlers are in `api/handlers/`; scheduled jobs register in `api/jobs/index.ts`; the payments provider is split into `provider/{stripe,fake}/` (payments, Connect, transport/scenarios) behind `provider/index.ts`; webhooks dispatch through a registry in `_shared/webhooks/`. The frozen marketplace contracts (schema, endpoints, provider interface) are in [`contracts.md`](contracts.md).
 - **One money rulebook.** Every amount comes from `supabase/functions/_shared/domain` (quote, tender allocation, cancellation curve, refund plan, tips, points, disputes, payouts). The UI previews with the same functions. The API adds bookkeeping only.
 - **Atomic writes.** Handlers never write tables directly. They collect whitelisted row operations (insert / guarded update / increment / delete / ledger txn / slot check) and send them to `tn_apply(ops jsonb)` (migration `…05_api_backend`), which runs them in a single transaction. Any error rolls everything back. PL/pgSQL helpers do only generic, validated bookkeeping, so the money logic is not duplicated in SQL.
   - Status changes are guarded (`update … where id = $1 and status = <expected>`, exactly one row), so a stale read cannot move a booking twice.
