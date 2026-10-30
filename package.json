@@ -21,6 +21,7 @@
     "check:functions": "deno check supabase/functions/api/index.ts supabase/functions/stripe-webhook/index.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.56.1",
     "@tailwindcss/vite": "^4.3.3",
@@ -42,7 +43,12 @@
     "vitest": "2.1.9"
   },
   "dependencies": {
+    "@stripe/connect-js": "3.5.0",
+    "@stripe/react-connect-js": "3.5.0",
+    "@stripe/react-stripe-js": "7.0.1",
+    "@stripe/stripe-js": "10.2.0",
     "@supabase/supabase-js": "^2.117.1",
+    "lucide-react": "1.64.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.6"
