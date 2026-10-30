@@ -15,6 +15,9 @@ export type Account =
   | "wallet_liability"
   | "refund_expense"
   | "dispute_loss"
+  | "dispute_hold" // disputed amount withdrawn by the card network, pending the outcome
+  | "dispute_fees" // dispute fees charged by the processor
+  | "stripe_fees" // processing fees from Stripe balance transactions
   | "payouts_clearing"
   | "points_outstanding" // POINTS unit
   | "points_issued"; // POINTS unit

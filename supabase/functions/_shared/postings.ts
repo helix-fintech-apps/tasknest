@@ -216,3 +216,119 @@ export function payoutTxn(taskerId: string, amount: number): Txn {
     cr("payouts_clearing", amount, taskerId),
   ]);
 }
+
+// ---- Marketplace additions (plan 7.2) ----------------------------------------------------------------
+
+/** Processing fee from a Stripe balance transaction: Stripe takes it out of the money we collected. */
+export function stripeFeeTxn(bookingId: string, feeCents: number): Txn | null {
+  if (feeCents <= 0) return null;
+  return txn("stripe_fee", [dr("stripe_fees", feeCents), cr("card_clearing", feeCents)], bookingId);
+}
+
+/**
+ * A dispute withdraws the disputed amount (and charges a fee) from the Stripe balance at once [S16]:
+ * "Debits the disputed amount, plus a dispute fee". The amount waits in dispute_hold for the outcome.
+ */
+export function disputeOpenedTxn(bookingId: string, amountCents: number, feeCents: number): Txn {
+  return txn(
+    "dispute_opened",
+    [
+      dr("dispute_hold", amountCents),
+      dr("dispute_fees", feeCents),
+      cr("card_clearing", amountCents + feeCents),
+    ],
+    bookingId,
+  );
+}
+
+/** Submitting evidence can cost a countered fee (taken now, returned if the dispute is won). */
+export function disputeCounteredTxn(bookingId: string, feeCents: number): Txn | null {
+  if (feeCents <= 0) return null;
+  return txn(
+    "dispute_countered",
+    [dr("dispute_fees", feeCents), cr("card_clearing", feeCents)],
+    bookingId,
+  );
+}
+
+/** Dispute won: the withdrawn amount is reinstated, and so is the countered fee. The first fee is not [S16]. */
+export function disputeWonTxn(
+  bookingId: string,
+  amountCents: number,
+  counteredFeeCents: number,
+): Txn {
+  return txn(
+    "dispute_won",
+    [
+      dr("card_clearing", amountCents + counteredFeeCents),
+      cr("dispute_hold", amountCents),
+      cr("dispute_fees", counteredFeeCents),
+    ],
+    bookingId,
+  );
+}
+
+/**
+ * Dispute lost after the money was already withdrawn and booked at open (disputeOpenedTxn): release the hold
+ * into the tasker's recovered share and the platform's loss. The fee was booked at open and is not repeated.
+ */
+export function disputeLostAfterOpenTxn(
+  bookingId: string,
+  clientId: string,
+  taskerId: string,
+  o: { heldCents: number; recover: number },
+  pointsClawedBack: number,
+  centsPerPoint: number,
+): Txn {
+  return txn(
+    "dispute_lost",
+    [
+      dr("tasker_payable", o.recover, taskerId),
+      dr("dispute_loss", o.heldCents - o.recover),
+      cr("dispute_hold", o.heldCents),
+      ...pointsClawbackLines(clientId, pointsClawedBack, centsPerPoint),
+    ],
+    bookingId,
+  );
+}
+
+/**
+ * A card refund failed [S15]: the client was not paid back. Reverse the card part of the refund. The tasker's
+ * clawback is reversed in proportion to the card share of the refund (all of it when the refund was card-only).
+ */
+export function refundFailedTxn(
+  bookingId: string,
+  taskerId: string,
+  r: { cardCents: number; totalCents: number; taskerClawbackCents: number },
+): Txn {
+  const clawBack =
+    r.cardCents === r.totalCents
+      ? r.taskerClawbackCents
+      : Math.floor((r.taskerClawbackCents * r.cardCents) / r.totalCents);
+  return txn(
+    "refund_failed",
+    [
+      dr("card_clearing", r.cardCents),
+      cr("refund_expense", r.cardCents - clawBack),
+      cr("tasker_payable", clawBack, taskerId),
+    ],
+    bookingId,
+  );
+}
+
+/** Staff refund a tip: the whole amount comes back from the tasker (tips pass through 100%). */
+export function tipRefundTxn(bookingId: string, taskerId: string, amountCents: number): Txn {
+  return txn(
+    "tip_refund",
+    [dr("tasker_payable", amountCents, taskerId), cr("card_clearing", amountCents)],
+    bookingId,
+  );
+}
+
+/** A transfer to the tasker's payout account was reversed: the tasker owes it again. */
+export function transferReversalTxn(taskerId: string, amountCents: number): Txn {
+  return txn("transfer_reversal", [
+    dr("payouts_clearing", amountCents, taskerId),
+    cr("tasker_payable", amountCents, taskerId),
+  ]);
+}

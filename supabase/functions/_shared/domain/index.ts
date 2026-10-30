@@ -11,3 +11,6 @@ export * from "./payouts.ts";
 export * from "./ledger.ts";
 export * from "./booking.ts";
 export * from "./promo.ts";
+export * from "./paymentPlan.ts";
+export * from "./transfers.ts";
+export * from "./availability.ts";

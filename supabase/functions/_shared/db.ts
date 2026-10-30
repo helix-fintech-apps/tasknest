@@ -4,6 +4,7 @@ import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   DEFAULT_POLICY,
   MoneyPolicy,
+  PaymentState,
   Txn,
   TenderParts,
   emptyParts,
@@ -12,6 +13,7 @@ import {
 import { HttpError, pgToHttp } from "./http.ts";
 
 export type Db = SupabaseClient;
+export type { PaymentState };
 
 interface DenoLike {
   env: { get(name: string): string | undefined };
@@ -84,6 +86,18 @@ export interface BookingRow {
   started_at: string | null;
   completed_at: string | null;
   canceled_at: string | null;
+  // Marketplace columns (docs/contracts.md 4.1). Null/'none' on bookings made under policy v1.
+  category_slug: string | null;
+  address_id: string | null;
+  payment_plan: "hold_now" | "save_card_hold_later" | "card_not_needed" | null;
+  payment_state: PaymentState;
+  hold_at: string | null;
+  capture_before: string | null;
+  stripe_charge_id: string | null;
+  stripe_customer_id: string | null;
+  payment_method_id: string | null;
+  setup_intent_id: string | null;
+  payment_expires_at: string | null;
 }
 
 export interface TenderRow {
@@ -290,15 +304,16 @@ export class UnitOfWork {
     this.ops.push({ op: "delete", table, where, expect });
     return this;
   }
-  ledger(t: Txn | null, suffix?: string): this {
+  ledger(t: Txn | null, suffix?: string, explicitKey?: string): this {
     if (!t || t.lines.length === 0) return this;
     this.ops.push({
       op: "ledger",
       kind: t.kind,
       booking_id: t.bookingId ?? "",
-      idempotency_key: this.idemPrefix
-        ? `${this.idemPrefix}:${t.kind}${suffix ? ":" + suffix : ""}`
-        : null,
+      // An explicit key makes the posting findable later (e.g. "was this dispute's money already booked?").
+      idempotency_key:
+        explicitKey ??
+        (this.idemPrefix ? `${this.idemPrefix}:${t.kind}${suffix ? ":" + suffix : ""}` : null),
       lines: t.lines.map((l) => ({
         account: l.account,
         party: l.party ?? "",

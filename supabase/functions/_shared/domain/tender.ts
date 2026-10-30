@@ -13,6 +13,8 @@ export interface TenderParts {
 export interface Allocation {
   parts: TenderParts;
   pointsUsed: number; // number of points (not cents)
+  /** Set (true) when the v2 card minimum shifted money from the other tenders onto the card. */
+  cardMinimumApplied?: true;
 }
 
 export interface Available {
@@ -62,7 +64,52 @@ export function allocateTenders(total: Cents, avail: Available, policy: MoneyPol
     }
   }
   parts.card = remaining;
-  return { parts, pointsUsed };
+  return enforceCardMinimum(total, parts, pointsUsed, policy);
+}
+
+/**
+ * Policy v2: the card share is 0 or at least `card.minChargeCents` (Stripe cannot charge 1-49 cents in USD).
+ * A card share of 1..min-1 is topped up by reducing the other tenders in reverse use order (wallet, then
+ * points, then promo) by the shortfall, so the card pays exactly `min`. Points are whole points, so a points
+ * reduction rounds up to a whole point and the card may then pay a few cents more than `min`.
+ * When the whole total is below `min` there is nothing to shift, and the booking is rejected.
+ * Policies without `card` (v1) are returned unchanged.
+ */
+function enforceCardMinimum(
+  total: Cents,
+  parts: TenderParts,
+  pointsUsed: number,
+  policy: MoneyPolicy,
+): Allocation {
+  const min = policy.card?.minChargeCents ?? 0;
+  if (min <= 0 || parts.card === 0 || parts.card >= min) return { parts, pointsUsed };
+  if (total < min) {
+    throw new Error(
+      `the card minimum is ${min} cents: a booking total of ${total} cents cannot be charged`,
+    );
+  }
+  const out: TenderParts = { ...parts };
+  let used = pointsUsed;
+  let shortfall = min - out.card;
+  const reverse = [...policy.tenderUseOrder].reverse().filter((t) => t !== "card");
+  for (const t of reverse) {
+    if (shortfall <= 0) break;
+    if (t === "points") {
+      const per = policy.points.centsPerPoint;
+      const takePoints = Math.min(used, Math.ceil(shortfall / per));
+      used -= takePoints;
+      out.points -= takePoints * per;
+      out.card += takePoints * per;
+      shortfall -= takePoints * per;
+    } else {
+      const take = Math.min(out[t], shortfall);
+      out[t] -= take;
+      out.card += take;
+      shortfall -= take;
+    }
+  }
+  if (shortfall > 0) throw new Error("card minimum could not be met"); // unreachable when total >= min
+  return { parts: out, pointsUsed: used, cardMinimumApplied: true };
 }
 
 /**

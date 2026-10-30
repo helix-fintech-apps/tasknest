@@ -28,12 +28,21 @@ export interface MoneyPolicy {
     strikesToSuspend: number;
     strikeWindowDays: number;
   };
+  /** Policy v2+. Absent in v1, which keeps v1 behaviour (no card minimum). */
+  card?: {
+    /** The card share of a booking is 0 or at least this many cents (Stripe's USD minimum charge is 50). */
+    minChargeCents: number;
+  };
   tips: {
     capBpsOfSubtotal: number; // max tip as share of task subtotal
     windowDays: number; // days after completion a tip is allowed
     platformFeeBps: number; // must be 0: tips pass through 100%
     allowedTenders: Tender[]; // tips are cash only
+    /** Policy v2+: smallest tip in cents (a tip is a card charge, so it must be chargeable). */
+    minCents?: number;
   };
+  /** Policy v2+: the card charge for extras at completion is 0 or at least this many cents. */
+  extras?: { minCardChargeCents: number };
   points: {
     centsPerPoint: number;
     pointsPerDollarCash: number; // earned on card cash paid, excluding tax and tips
@@ -49,9 +58,30 @@ export interface MoneyPolicy {
   retentionOrder: Tender[]; // which tender a cancellation fee is taken from first
   payouts: { holdDays: number };
   refunds: { agentLimitCents: number; windowDays: number; providerShare: "proportional" };
-  auth: { validityDays: number; reauthBufferDays: number };
+  auth: {
+    validityDays: number;
+    reauthBufferDays: number;
+    /** Policy v2+: `hold_now` when the start is at most this many hours away (inside the 7-day on-session window). */
+    holdNowMaxHoursBeforeStart?: number;
+    /** Policy v2+: a scheduled hold is placed this many hours before the start (`hold_at`). */
+    scheduledHoldLeadHours?: number;
+    /** Policy v2+: re-hold when the hold's capture_before is earlier than start + estimate + this many hours. */
+    captureBufferHours?: number;
+  };
   booking: { taskerResponseHours: number };
+  /** Policy v2+: the card-consent text version the client must accept to save a card. */
+  consent?: { textVersion: string };
 }
+
+/**
+ * Card-consent texts by version. The server records the version and the SHA-256 of this exact text in
+ * `card_consents`; the checkout UI shows it. Stripe requires stated terms, explicit consent and a record
+ * for off-session charges. Needs owner/legal approval before real launch (plan decision D8).
+ */
+export const CARD_CONSENT_TEXTS: Record<string, string> = {
+  "card-consent-v1":
+    "Save this card to my TaskNest account. I allow TaskNest to place and re-place the hold for this task, and to charge it for extra time and expenses, cancellation or no-show fees under the published policy, and tips I choose.",
+};
 
 export const DEFAULT_POLICY: MoneyPolicy = {
   version: 1,
@@ -87,4 +117,24 @@ export const DEFAULT_POLICY: MoneyPolicy = {
   refunds: { agentLimitCents: 10_000, windowDays: 30, providerShare: "proportional" },
   auth: { validityDays: 7, reauthBufferDays: 1 },
   booking: { taskerResponseHours: 24 },
+};
+
+/**
+ * Money policy v2 (seeded by migration 20261101000100). Everything not listed below is copied from v1, so
+ * quotes, fees, the cancellation curve and payouts do not move; v2 adds the card minimum, the tip and extras
+ * minimums, and the hold-timing rules behind `planPayment`.
+ */
+export const POLICY_V2: MoneyPolicy = {
+  ...DEFAULT_POLICY,
+  version: 2,
+  card: { minChargeCents: 50 },
+  tips: { ...DEFAULT_POLICY.tips, minCents: 50 },
+  extras: { minCardChargeCents: 50 },
+  auth: {
+    ...DEFAULT_POLICY.auth,
+    holdNowMaxHoursBeforeStart: 96,
+    scheduledHoldLeadHours: 48,
+    captureBufferHours: 24,
+  },
+  consent: { textVersion: "card-consent-v1" },
 };

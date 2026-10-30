@@ -74,3 +74,11 @@ begin
     ));
   end if;
 end $$;
+
+-- Simulated saved cards (fake payments provider only; docs/contracts.md 4.2). A booking made with no explicit
+-- payment uses the client's default method, so the existing flows keep working: 'sim_pm_success' is the
+-- fake provider's always-succeeds test card. Real Stripe mode never uses these ids (the API refuses 'sim_*'
+-- there), and real customers have no default until they add a card.
+update public.profiles set default_payment_method_id = 'sim_pm_success'
+ where id in ('00000000-0000-4000-a000-000000000001', '00000000-0000-4000-a000-000000000002')
+   and default_payment_method_id is null;

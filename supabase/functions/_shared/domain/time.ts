@@ -56,3 +56,33 @@ export function addMonths(d: Date, months: number): Date {
   r.setUTCMonth(r.getUTCMonth() + months);
   return r;
 }
+
+/** The wall-clock date ("YYYY-MM-DD"), minute of day and weekday (0 = Sunday) of an instant in `tz`. */
+export function localParts(
+  instant: Date,
+  tz: string,
+): { date: string; minuteOfDay: number; weekday: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(instant);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  const date = `${get("year")}-${get("month")}-${get("day")}`;
+  return {
+    date,
+    minuteOfDay: Number(get("hour")) * 60 + Number(get("minute")),
+    weekday: new Date(`${date}T00:00:00Z`).getUTCDay(),
+  };
+}
+
+/** Add whole calendar days to a "YYYY-MM-DD" date. */
+export function addLocalDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
