@@ -26,9 +26,22 @@ export default defineConfig({
   },
   projects: [
     {
+      // Desktop: every spec, including the original ones.
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        launchOptions: executablePath ? { executablePath } : {},
+      },
+    },
+    {
+      // Phone viewport (390x844): every spec except the original two.
+      name: "phone",
+      testIgnore: ["**/ui.spec.ts", "**/backend.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
         launchOptions: executablePath ? { executablePath } : {},
       },
     },

@@ -11,6 +11,7 @@ import {
   type MoneyPolicy,
   type RefundKind,
 } from "../supabase/functions/_shared/domain/index.ts";
+import { handleExtra } from "./mocks/registry";
 
 export const PASSWORD = "TaskNest!2026";
 const H = 3_600_000;
@@ -582,6 +583,8 @@ export async function mockBackend(page: Page, db = makeDb()): Promise<MockBacken
       const r = h.handler(call);
       return json(route, r.status ?? 200, r.body);
     }
+    const extra = handleExtra(call, { db, currentUser });
+    if (extra) return json(route, extra.status ?? 200, extra.body);
     if (path === "/quote")
       return json(route, 503, { error: { code: "unavailable", message: "mock: no server quote" } });
     const m = /^\/bookings\/([^/]+)\/(\w[\w-]*)$/.exec(path);

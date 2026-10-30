@@ -1,17 +1,9 @@
-import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { homeFor, useAuth } from "./lib/auth";
 import type { Role } from "./lib/supabase";
-import { Spinner } from "./components/ui";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import SignIn from "./pages/SignIn";
-import Taskers from "./pages/Taskers";
-import TaskerProfile from "./pages/TaskerProfile";
-import MyBookings from "./pages/MyBookings";
-import Points from "./pages/Points";
-import TaskerDashboard from "./pages/TaskerDashboard";
-import Console from "./pages/Console";
-import Pricing from "./pages/Pricing";
+import { AppRoutes } from "./routes";
 
 const NAV: Record<Role, { to: string; label: string; testId: string }[]> = {
   client: [
@@ -90,78 +82,10 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
-  const { session, profile, loading } = useAuth();
-  if (loading) return <Spinner />;
-  if (!session) return <Navigate to="/signin" replace />;
-  if (!profile) return <Spinner />;
-  if (!roles.includes(profile.role)) return <Navigate to={homeFor(profile.role)} replace />;
-  return <>{children}</>;
-}
-
-function Home() {
-  const { session, profile, loading } = useAuth();
-  if (loading || (session && !profile)) return <Spinner />;
-  return <Navigate to={session ? homeFor(profile?.role) : "/signin"} replace />;
-}
-
 export default function App() {
   return (
     <Shell>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/signin" element={<SignIn />} />
-        <Route path="/pricing" element={<Pricing />} />
-        <Route
-          path="/taskers"
-          element={
-            <RequireRole roles={["client", "admin", "support_agent"]}>
-              <Taskers />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/taskers/:id"
-          element={
-            <RequireRole roles={["client", "admin", "support_agent"]}>
-              <TaskerProfile />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/bookings"
-          element={
-            <RequireRole roles={["client"]}>
-              <MyBookings />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/points"
-          element={
-            <RequireRole roles={["client"]}>
-              <Points />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/tasker"
-          element={
-            <RequireRole roles={["tasker"]}>
-              <TaskerDashboard />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/console"
-          element={
-            <RequireRole roles={["admin", "support_agent"]}>
-              <Console />
-            </RequireRole>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <AppRoutes />
     </Shell>
   );
 }
