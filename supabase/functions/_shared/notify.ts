@@ -10,6 +10,7 @@ export type NotificationKind =
   | "booking_canceled" // the other party
   | "booking_rescheduled" // the other party
   | "booking_completed" // client: pay, rate and tip
+  | "payment_abandoned" // client: the booking was not completed in time
   | "payment_action_required" // client: a charge needs their approval
   | "tip_received" // tasker
   | "tip_refunded" // tasker

@@ -5,12 +5,14 @@
 import { HttpError } from "../../_shared/http.ts";
 import { Ctx } from "../context.ts";
 import { autoDeclineRequests } from "./autoDecline.ts";
+import { expirePendingPayments } from "./expirePending.ts";
 
 export type Job = (ctx: Ctx) => Promise<unknown>;
 
 /** job name -> implementation. Append a line to register a job (WS4: payment jobs, WS5: payout jobs). */
 export const jobs: Record<string, Job> = {
   "auto-decline-requests": autoDeclineRequests,
+  "expire-pending-payments": expirePendingPayments,
 };
 
 export async function runJob(ctx: Ctx): Promise<unknown> {

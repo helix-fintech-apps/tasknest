@@ -956,9 +956,11 @@ export async function providerFault(
   ctx: Ctx,
   b: BookingRow,
   policy: MoneyPolicy,
-  toStatus: "declined" | "canceled_tasker" | "no_show_tasker",
+  toStatus: "declined" | "canceled_tasker" | "no_show_tasker" | "payment_abandoned",
   reason: string,
 ) {
+  // declined and payment_abandoned are nobody's fault: full release, no refund row, no strike.
+  const faultless = toStatus === "declined" || toStatus === "payment_abandoned";
   const { paid } = await loadTenders(ctx.db, b.id);
   const movs = await loadMovements(ctx.db, b.id);
   const lots = await loadLots(ctx.db, b.client_id);
@@ -990,7 +992,7 @@ export async function providerFault(
     uow.ledger(releaseHoldTxn(b.id, b.client_id, nonCardParts(paid), pointsBack));
     let suspended = false;
     let strikeCount = 0;
-    if (toStatus !== "declined") {
+    if (!faultless) {
       uow.insert("refunds", {
         booking_id: b.id,
         kind: "cancellation",
@@ -1041,20 +1043,28 @@ export async function providerFault(
     uow.audit(ctx.user.id, toStatus, "booking", b.id, reason);
     notify(uow, {
       userId: b.client_id,
-      kind: toStatus === "declined" ? "booking_declined" : "booking_canceled",
+      kind:
+        toStatus === "declined"
+          ? "booking_declined"
+          : toStatus === "payment_abandoned"
+            ? "payment_abandoned"
+            : "booking_canceled",
       bookingId: b.id,
       title:
         toStatus === "declined"
           ? "Your booking request was declined"
-          : "Your tasker canceled this booking",
+          : toStatus === "payment_abandoned"
+            ? "Your booking was not completed"
+            : "Your tasker canceled this booking",
       body: "Your hold was released and any points or credit returned.",
     });
     await uow.commit(ctx.db);
     return { suspended, strikeCount };
   };
   // Strikes are counted per tasker: serialize strike-bearing operations for the same tasker.
-  const { suspended, strikeCount } =
-    toStatus === "declined" ? await run() : await withLocks(ctx.db, [`tasker:${b.tasker_id}`], run);
+  const { suspended, strikeCount } = faultless
+    ? await run()
+    : await withLocks(ctx.db, [`tasker:${b.tasker_id}`], run);
   if (b.stripe_payment_intent_id) {
     await ctx.provider.cancel(b.stripe_payment_intent_id, `${b.id}:cancel`).catch(() => {});
     await ctx.db
@@ -1065,10 +1075,9 @@ export async function providerFault(
   return bookingResponse(ctx, b.id, {
     outcome,
     refund: { refundCents: partsTotal(paid), retainedCents: 0, perTender: paid },
-    strike:
-      toStatus === "declined"
-        ? null
-        : { feeCents: outcome.taskerFeeCents, strikesInWindow: strikeCount, suspended },
+    strike: faultless
+      ? null
+      : { feeCents: outcome.taskerFeeCents, strikesInWindow: strikeCount, suspended },
   });
 }
 

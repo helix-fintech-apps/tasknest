@@ -50,7 +50,7 @@ avatar_url, skills, service_zips`. `select *` on `taskers` therefore fails with 
 | Route type and helpers (`Route`, `ID`, `booking()`) | `api/route.ts`                                                                                                                                                                           |
 | Route table                                         | `api/routes.ts` concatenates `api/routes/{booking,actions,money,discovery,jobs,payments,tasker,connect,payouts,support,admin,sim}.ts`, each exporting `routes: Route[]`                  |
 | Handlers                                            | `api/handlers/{bookings,money,admin,payouts}.ts` (existing code) and empty `{payments,connect,tasker,support,sim,discovery}.ts`                                                          |
-| Jobs                                                | `api/jobs/index.ts`: `jobs` registry (empty) and `runJob` behind `POST /jobs/:name`                                                                                                      |
+| Jobs                                                | `api/jobs/index.ts`: `jobs` registry (WS7: `auto-decline-requests`, `expire-pending-payments`) and `runJob` behind `POST /jobs/:name`                                                    |
 | Provider                                            | `_shared/provider/types.ts` (the 4.4 interface), `stripe/{http,payments,connect,index}.ts`, `fake/{payments,connect,scenarios,index}.ts`, `index.ts` re-exports the same names as before |
 | Webhooks                                            | `_shared/webhooks/index.ts` (verify, store, dispatch registry), `payments.ts`, `refunds.ts`, `disputes.ts`, `connect.ts`                                                                 |
 
@@ -332,3 +332,8 @@ The old `authorize`, `charge` and `transfer(TransferInput)` stay as deprecated w
 | `MessagesPanel`        | WS3   | WS5 (job page)                                       | `{bookingId, role}`                                                                                                                            |
 | `ConnectProvider`      | WS5   | WS5                                                  | one `loadConnectAndInitialize` per session [S8]; `logout()` only at sign-out (WS1's `signOut` calls the registered hook)                       |
 | `StatusChip` tone map  | WS1   | all                                                  | §12                                                                                                                                            |
+
+### 4.7 WS7-b additions (additive, no frozen contract changed)
+
+- Job `expire-pending-payments` (`POST /jobs/expire-pending-payments`, system only, every 5 min): `pending_payment` bookings past `payment_expires_at` become `payment_abandoned` through the no-fault release path (slot freed, points and promo returned, PaymentIntent canceled, no fee, no strike). Optional body `{bookingId}`. Response `{checked, abandoned[], errors[]}`.
+- Notification kind `payment_abandoned`.
