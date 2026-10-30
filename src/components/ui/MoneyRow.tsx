@@ -18,7 +18,7 @@ export function MoneyRow({
 }) {
   return (
     <div
-      className={`flex justify-between py-1 text-sm ${strong ? "border-t border-slate-200 pt-2 font-semibold text-slate-900" : muted ? "text-slate-400" : "text-slate-700"}`}
+      className={`flex justify-between py-1 text-sm ${strong ? "border-t border-line pt-2 font-semibold text-fg" : muted ? "text-subtle" : "text-fg"}`}
     >
       <span>{label}</span>
       <span data-testid={testId} className="tabular-nums">

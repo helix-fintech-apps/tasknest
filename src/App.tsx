@@ -1,91 +1,49 @@
-import { NavLink, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
-import { homeFor, useAuth } from "./lib/auth";
-import type { Role } from "./lib/supabase";
+import { useAuth } from "./lib/auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ToastProvider } from "./components/ui/Toast";
+import { AppHeader } from "./components/shell/AppHeader";
+import { Footer } from "./components/shell/Footer";
+import { RouteAnnouncer } from "./components/shell/RouteAnnouncer";
+import { SkipLink } from "./components/shell/SkipLink";
+import { StaffSidebar } from "./components/shell/StaffSidebar";
+import { useIsDesktop } from "./components/shell/useMediaQuery";
+import { HealthProvider } from "./lib/health";
 import { AppRoutes } from "./routes";
 
-const NAV: Record<Role, { to: string; label: string; testId: string }[]> = {
-  client: [
-    { to: "/taskers", label: "Find a tasker", testId: "nav-taskers" },
-    { to: "/bookings", label: "My bookings", testId: "nav-bookings" },
-    { to: "/points", label: "Points", testId: "nav-points" },
-  ],
-  tasker: [{ to: "/tasker", label: "Dashboard", testId: "nav-tasker" }],
-  admin: [{ to: "/console", label: "Console", testId: "nav-console" }],
-  support_agent: [{ to: "/console", label: "Support console", testId: "nav-console" }],
-};
-
 function Shell({ children }: { children: ReactNode }) {
-  const { profile, session, signOut } = useAuth();
-  const nav = useNavigate();
-  const links = profile ? NAV[profile.role] : [];
-  const linkCls = ({ isActive }: { isActive: boolean }) =>
-    `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:text-slate-900"}`;
+  const { profile } = useAuth();
+  const desktop = useIsDesktop();
+  const staff = profile?.role === "admin" || profile?.role === "support_agent";
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-          <NavLink
-            to={homeFor(profile?.role)}
-            className="flex items-center gap-2 text-lg font-semibold text-blue-700"
-          >
-            <span className="inline-block h-7 w-7 rounded-lg bg-blue-600 text-center text-white">
-              ⌂
-            </span>{" "}
-            TaskNest
-          </NavLink>
-          <nav className="flex flex-1 flex-wrap items-center gap-1" data-testid="main-nav">
-            {links.map((l) => (
-              <NavLink key={l.to} to={l.to} className={linkCls} data-testid={l.testId}>
-                {l.label}
-              </NavLink>
-            ))}
-            <NavLink to="/pricing" className={linkCls} data-testid="nav-pricing">
-              Pricing & policies
-            </NavLink>
-          </nav>
-          {session ? (
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-slate-600" data-testid="current-user">
-                {profile?.full_name || session.user.email}{" "}
-                <span className="text-xs text-slate-400">
-                  ({profile?.role?.replace("_", " ") ?? "…"})
-                </span>
-              </span>
-              <button
-                data-testid="sign-out"
-                className="text-slate-500 hover:text-slate-800"
-                onClick={async () => {
-                  await signOut();
-                  nav("/signin");
-                }}
-              >
-                Sign out
-              </button>
-            </div>
-          ) : (
-            <NavLink
-              to="/signin"
-              className="text-sm font-medium text-blue-700"
-              data-testid="nav-signin"
-            >
-              Sign in
-            </NavLink>
-          )}
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        <ErrorBoundary>{children}</ErrorBoundary>
-      </main>
+    <div className="flex min-h-dvh flex-col">
+      <SkipLink />
+      <AppHeader />
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 gap-8 px-4 py-6 md:px-6 md:py-8">
+        {staff && desktop && <StaffSidebar role={profile!.role} />}
+        <main
+          id="main"
+          tabIndex={-1}
+          className="min-w-0 flex-1 pb-20 focus:outline-none md:pb-0"
+          data-testid="main"
+        >
+          <ErrorBoundary>{children}</ErrorBoundary>
+        </main>
+      </div>
+      <Footer />
+      <RouteAnnouncer />
     </div>
   );
 }
 
 export default function App() {
   return (
-    <Shell>
-      <AppRoutes />
-    </Shell>
+    <HealthProvider>
+      <ToastProvider>
+        <Shell>
+          <AppRoutes />
+        </Shell>
+      </ToastProvider>
+    </HealthProvider>
   );
 }

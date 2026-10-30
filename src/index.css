@@ -1,22 +1,347 @@
 @import "tailwindcss";
 
+/* TaskNest design tokens. Brand ramps: Dusk (indigo-violet), Yolk (warm amber), Twig (warm greys).
+   Semantic tokens live on :root and are redefined for the dark theme on [data-theme="dark"], which
+   src/lib/theme.ts (and the inline script in index.html) sets before first paint. */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/fonts/bricolage-grotesque-latin-wght-normal.woff2") format("woff2-variations");
+}
+
 @theme {
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-dusk-50: #f2f1fd;
+  --color-dusk-100: #e3e1fb;
+  --color-dusk-200: #c7c3f6;
+  --color-dusk-300: #a29cef;
+  --color-dusk-400: #7c73e6;
+  --color-dusk-500: #5b50da;
+  --color-dusk-600: #4a3fc8;
+  --color-dusk-700: #3c32a6;
+  --color-dusk-800: #2f2884;
+  --color-dusk-900: #221d5f;
+  --color-yolk-50: #fff6e0;
+  --color-yolk-300: #ffd98a;
+  --color-yolk-400: #ffc857;
+  --color-yolk-500: #f2a900;
+  --color-yolk-800: #7a4e00;
+  --color-twig-0: #ffffff;
+  --color-twig-25: #fbfaf8;
+  --color-twig-50: #f5f3ef;
+  --color-twig-100: #ebe8e2;
+  --color-twig-200: #d9d4cb;
+  --color-twig-300: #bdb6aa;
+  --color-twig-400: #958d80;
+  --color-twig-500: #7a7266;
+  --color-twig-600: #5f584e;
+  --color-twig-700: #47413a;
+  --color-twig-800: #2e2a25;
+  --color-twig-900: #1c1915;
+  --color-night-800: #1e1b26;
+  --color-night-900: #14121a;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --shadow-1: 0 1px 2px rgb(28 25 21 / 0.06), 0 1px 1px rgb(28 25 21 / 0.04);
+  --shadow-2: 0 4px 12px rgb(28 25 21 / 0.08);
+  --shadow-3: 0 12px 32px rgb(28 25 21 / 0.14);
+
+  /* Bridge for pages written against Tailwind's stock palette: blue becomes Dusk, slate becomes
+     Twig. Dark mode flips these variables below, so older pages follow the theme too. */
+  --color-blue-50: var(--color-dusk-50);
+  --color-blue-100: var(--color-dusk-100);
+  --color-blue-200: var(--color-dusk-200);
+  --color-blue-300: var(--color-dusk-300);
+  --color-blue-400: var(--color-dusk-400);
+  --color-blue-500: var(--color-dusk-500);
+  --color-blue-600: var(--color-dusk-600);
+  --color-blue-700: var(--color-dusk-700);
+  --color-blue-800: var(--color-dusk-800);
+  --color-blue-900: var(--color-dusk-900);
+  --color-slate-50: var(--color-twig-50);
+  --color-slate-100: var(--color-twig-100);
+  --color-slate-200: var(--color-twig-200);
+  --color-slate-300: var(--color-twig-300);
+  --color-slate-400: var(--color-twig-500);
+  --color-slate-500: var(--color-twig-600);
+  --color-slate-600: var(--color-twig-700);
+  --color-slate-700: var(--color-twig-800);
+  --color-slate-800: var(--color-twig-900);
+  --color-slate-900: var(--color-twig-900);
+}
+
+/* Semantic tokens become utilities: bg-bg, bg-surface, text-fg, text-muted, border-line, ... */
+@theme inline {
+  --color-bg: var(--tn-bg);
+  --color-surface: var(--tn-surface);
+  --color-surface-muted: var(--tn-surface-muted);
+  --color-fg: var(--tn-text);
+  --color-muted: var(--tn-text-muted);
+  --color-subtle: var(--tn-text-subtle);
+  --color-line: var(--tn-border);
+  --color-line-input: var(--tn-border-input);
+  --color-primary: var(--tn-primary);
+  --color-primary-hover: var(--tn-primary-hover);
+  --color-on-primary: var(--tn-on-primary);
+  --color-link: var(--tn-link);
+  --color-focus: var(--tn-focus);
+  --color-success: var(--tn-success);
+  --color-success-bg: var(--tn-success-bg);
+  --color-warning: var(--tn-warning);
+  --color-warning-bg: var(--tn-warning-bg);
+  --color-danger: var(--tn-danger);
+  --color-danger-bg: var(--tn-danger-bg);
+  --color-info: var(--tn-info);
+  --color-info-bg: var(--tn-info-bg);
+  --color-hold: var(--tn-hold);
+  --color-hold-bg: var(--tn-hold-bg);
+  --color-rating: var(--tn-rating);
+}
+
+:root {
+  color-scheme: light;
+  --tn-bg: var(--color-twig-25);
+  --tn-surface: var(--color-twig-0);
+  --tn-surface-muted: var(--color-twig-50);
+  --tn-text: var(--color-twig-900);
+  --tn-text-muted: var(--color-twig-600);
+  --tn-text-subtle: var(--color-twig-500);
+  --tn-border: var(--color-twig-200);
+  --tn-border-input: var(--color-twig-400);
+  --tn-primary: var(--color-dusk-600);
+  --tn-primary-hover: var(--color-dusk-700);
+  --tn-on-primary: #ffffff;
+  --tn-link: var(--color-dusk-700);
+  --tn-focus: var(--color-dusk-500);
+  --tn-success: #1f7a4d;
+  --tn-success-bg: #e8f5ee;
+  --tn-warning: #8a4b00;
+  --tn-warning-bg: #fff4e5;
+  --tn-danger: #b42318;
+  --tn-danger-bg: #fef0ee;
+  --tn-info: var(--color-dusk-700);
+  --tn-info-bg: var(--color-dusk-50);
+  --tn-hold: var(--color-yolk-800);
+  --tn-hold-bg: var(--color-yolk-50);
+  --tn-rating: var(--color-yolk-500);
+  --tn-simulated-fg: var(--color-twig-700);
+  --tn-simulated-stripe: var(--color-twig-200);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --tn-bg: var(--color-night-900);
+  --tn-surface: var(--color-night-800);
+  --tn-surface-muted: #26222f;
+  --tn-text: var(--color-twig-50);
+  --tn-text-muted: var(--color-twig-300);
+  --tn-text-subtle: #a59db3;
+  --tn-border: #3a3545;
+  --tn-border-input: #6e6779;
+  --tn-primary: var(--color-dusk-300);
+  --tn-primary-hover: var(--color-dusk-200);
+  --tn-on-primary: var(--color-night-900);
+  --tn-link: var(--color-dusk-300);
+  --tn-focus: var(--color-dusk-400);
+  --tn-success: #6cd3a0;
+  --tn-success-bg: #14382a;
+  --tn-warning: #ffc857;
+  --tn-warning-bg: #3a2700;
+  --tn-danger: #fda29b;
+  --tn-danger-bg: #4d1d17;
+  --tn-info: var(--color-dusk-200);
+  --tn-info-bg: #221d5f;
+  --tn-hold: var(--color-yolk-300);
+  --tn-hold-bg: #33260a;
+  --tn-rating: var(--color-yolk-400);
+  --tn-simulated-fg: var(--color-twig-100);
+  --tn-simulated-stripe: #4a4458;
+
+  /* Stock-palette bridge, inverted. */
+  --color-white: var(--color-night-800);
+  --color-slate-50: var(--color-night-900);
+  --color-slate-100: #26222f;
+  --color-slate-200: #3a3545;
+  --color-slate-300: #4b4557;
+  --color-slate-400: #a59db3;
+  --color-slate-500: #b4adc0;
+  --color-slate-600: #c9c3d3;
+  --color-slate-700: #dad5e2;
+  --color-slate-800: #eae7f0;
+  --color-slate-900: #f5f3fa;
+  --color-blue-50: #221d5f;
+  --color-blue-100: #2f2884;
+  --color-blue-200: #3c32a6;
+  --color-blue-300: #7c73e6;
+  --color-blue-400: #a29cef;
+  --color-blue-500: #a29cef;
+  --color-blue-600: #a29cef;
+  --color-blue-700: #c7c3f6;
+  --color-blue-800: #e3e1fb;
+  --color-blue-900: #f2f1fd;
+  --color-emerald-50: #0f2a1d;
+  --color-emerald-100: #14382a;
+  --color-emerald-200: #1f5c41;
+  --color-emerald-700: #6cd3a0;
+  --color-emerald-800: #8fe0b8;
+  --color-emerald-900: #b5ebd0;
+  --color-amber-50: #2e2000;
+  --color-amber-100: #3f2d00;
+  --color-amber-200: #5c4200;
+  --color-amber-700: #ffd98a;
+  --color-amber-800: #ffe3a8;
+  --color-amber-900: #fff0cc;
+  --color-red-50: #3a1511;
+  --color-red-100: #4d1d17;
+  --color-red-200: #7a2a20;
+  --color-red-600: #fda29b;
+  --color-red-700: #fda29b;
+  --color-red-800: #fecdca;
+  --color-indigo-100: #2f2884;
+  --color-indigo-800: #c7c3f6;
 }
 
 html {
-  color-scheme: light;
+  font-family: var(--font-sans);
+  scroll-padding-top: 5rem;
 }
 body {
-  @apply bg-slate-50 text-slate-800 antialiased;
+  background: var(--tn-bg);
+  color: var(--tn-text);
+  @apply antialiased;
+  font-size: 1rem;
+  line-height: 1.5;
+  overflow-x: clip;
 }
+h1,
+h2 {
+  font-family: var(--font-display);
+}
+h1:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 3px solid var(--tn-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+[data-money-cents],
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* Tables: always a real <table>; under md, rows restyle as stacked cards (data-table="cards"). */
 table {
   @apply w-full text-left text-sm;
 }
 th {
-  @apply border-b border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500;
+  border-bottom: 1px solid var(--tn-border);
+  @apply px-3 py-2 text-xs font-semibold uppercase tracking-wide;
+  color: var(--tn-text-muted);
 }
 td {
-  @apply border-b border-slate-100 px-3 py-2 align-top;
+  border-bottom: 1px solid var(--tn-border);
+  @apply px-3 py-2 align-top;
+}
+.tn-scroll {
+  overflow-x: auto;
+}
+@media (max-width: 767px) {
+  table.tn-cards,
+  table.tn-cards tbody {
+    display: block;
+  }
+  table.tn-cards thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  table.tn-cards tr {
+    display: block;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--tn-border);
+    border-radius: var(--radius-lg);
+    background: var(--tn-surface);
+    padding: 0.5rem 0.75rem;
+  }
+  table.tn-cards td {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 0;
+    padding: 0.35rem 0;
+    text-align: right;
+  }
+  table.tn-cards td::before {
+    content: attr(data-label);
+    color: var(--tn-text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-align: left;
+  }
+}
+
+/* The simulated stripe: a hatched edge on anything the fake provider renders. */
+.tn-simulated-stripe {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--tn-simulated-stripe) 0 6px,
+    transparent 6px 12px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Inputs are at least 16px on phones so iOS does not zoom on focus. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+.tn-initials::before {
+  content: attr(data-initials);
+}
+
+@keyframes tn-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+@keyframes tn-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
