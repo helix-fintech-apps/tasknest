@@ -1,14 +1,18 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
+import { cx } from "./cx";
 
 export function Card({
   children,
   className = "",
   ...p
-}: { children: ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
+}: { children: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       {...p}
-      className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}
+      className={cx(
+        "rounded-xl border border-line bg-surface p-5 shadow-[var(--shadow-1)]",
+        className,
+      )}
     >
       {children}
     </div>
@@ -28,11 +32,11 @@ export function Stat({
 }) {
   return (
     <Card className="!p-4">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div data-testid={testId} className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
+      <div data-testid={testId} className="mt-1 text-2xl font-semibold tabular-nums text-fg">
         {value}
       </div>
-      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
+      {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </Card>
   );
 }

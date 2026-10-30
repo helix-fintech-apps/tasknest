@@ -1,18 +1,29 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Route, Routes } from "react-router-dom";
 import { publicRoutes } from "./public";
 import { clientRoutes } from "./client";
 import { taskerRoutes } from "./tasker";
 import { staffRoutes } from "./staff";
+import { aliasRoutes } from "./aliases";
+import { Spinner } from "../components/ui";
 
-/** The route table, composed from one file per audience. Unknown paths go home (WS1 adds a 404 later). */
+const NotFound = lazy(() => import("../pages/NotFound"));
+
+/**
+ * The route table, composed from one file per audience. Aliases come first so they win over the
+ * (older) `/points` route in client.tsx. Unknown paths render the 404 page, not a silent redirect.
+ */
 export function AppRoutes() {
   return (
-    <Routes>
-      {publicRoutes}
-      {clientRoutes}
-      {taskerRoutes}
-      {staffRoutes}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<Spinner />}>
+      <Routes>
+        {aliasRoutes}
+        {publicRoutes}
+        {clientRoutes}
+        {taskerRoutes}
+        {staffRoutes}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
   );
 }

@@ -35,6 +35,14 @@ export function keepsIdempotencyKey(e: unknown): boolean {
 /** Automatic retries (same key) for `409 busy` / `request_in_progress`, in ms. */
 export const BUSY_RETRY_DELAYS_MS = [400, 800, 1600];
 
+type ReplayListener = () => void;
+const replayListeners = new Set<ReplayListener>();
+/** Called when the API answers with a stored response (`Idempotent-Replayed: true`). Returns an unsubscribe. */
+export function onIdempotentReplay(fn: ReplayListener): () => void {
+  replayListeners.add(fn);
+  return () => replayListeners.delete(fn);
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function newIdempotencyKey(): string {
@@ -87,6 +95,7 @@ async function callOnce<T>(
   } catch (e) {
     throw new ApiError(0, "network_error", `Could not reach the API: ${(e as Error).message}`);
   }
+  if (res.headers.get("Idempotent-Replayed") === "true") replayListeners.forEach((fn) => fn());
   const text = await res.text();
   let json: unknown = null;
   try {
@@ -123,15 +132,28 @@ export function errorMessage(e: unknown): string {
  * busy responses a few times with that key), so a retry can't double-charge. The key is rotated after
  * a success or any other 4xx, whose response the API stores and would replay for the old key.
  */
-export function useAction<A extends unknown[], R>(fn: (key: string, ...args: A) => Promise<R>) {
+export function useAction<A extends unknown[], R>(
+  fn: (key: string, ...args: A) => Promise<R>,
+  opts?: {
+    /**
+     * Re-read the server state after a failure that may have gone through (network error, 5xx).
+     * While it runs, `checking` is true and the message says we are checking.
+     */
+    recheck?: () => Promise<unknown>;
+  },
+) {
   const key = useRef(newIdempotencyKey());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
+  const recheck = opts?.recheck;
   const run = useCallback(
     async (...args: A): Promise<R | undefined> => {
       if (pending) return undefined;
       setPending(true);
       setError(null);
+      setUncertain(false);
       try {
         const r = await fn(key.current, ...args);
         key.current = newIdempotencyKey();
@@ -140,14 +162,32 @@ export function useAction<A extends unknown[], R>(fn: (key: string, ...args: A) 
         // Keep the key when the request may not have finished (network, 5xx, 409 busy /
         // request_in_progress), so the user's retry cannot run it twice. A final 4xx answer is stored
         // by the API for that key, so the next attempt needs a new one.
-        if (!keepsIdempotencyKey(e)) key.current = newIdempotencyKey();
+        const mayHaveRun = keepsIdempotencyKey(e);
+        if (!mayHaveRun) key.current = newIdempotencyKey();
         setError(errorMessage(e));
+        if (mayHaveRun) {
+          setUncertain(true);
+          if (recheck) {
+            setChecking(true);
+            setError("Checking whether this went through…");
+            try {
+              await recheck();
+            } catch {
+              /* the re-read failing changes nothing: the message below still tells the truth */
+            } finally {
+              setChecking(false);
+            }
+            setError(
+              `${errorMessage(e)} We re-checked your latest data. If the change is not there, trying again is safe: the same request key is used, so it cannot run twice.`,
+            );
+          }
+        }
         return undefined;
       } finally {
         setPending(false);
       }
     },
-    [fn, pending],
+    [fn, pending, recheck],
   );
-  return { run, pending, error, setError };
+  return { run, pending, error, setError, checking, uncertain };
 }

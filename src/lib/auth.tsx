@@ -13,6 +13,13 @@ interface AuthState {
 
 const Ctx = createContext<AuthState | null>(null);
 
+const signOutHooks = new Set<() => void | Promise<void>>();
+/** Run `fn` when the user signs out (e.g. Stripe Connect's `logout()`). Returns an unsubscribe. */
+export function registerSignOutHook(fn: () => void | Promise<void>): () => void {
+  signOutHooks.add(fn);
+  return () => signOutHooks.delete(fn);
+}
+
 async function loadProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from("profiles")
@@ -59,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return p;
     },
     async signOut() {
+      await Promise.allSettled([...signOutHooks].map((h) => h()));
       await supabase.auth.signOut();
       setSession(null);
       setProfile(null);

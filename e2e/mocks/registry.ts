@@ -26,7 +26,16 @@ export interface MockResponse {
 
 export type ExtraHandler = (call: ApiCall, ctx: MockContext) => MockResponse | undefined;
 
+/** GET /health: the simulated provider and no feature flags, like a fresh local stack. */
+const healthHandler: ExtraHandler = (call) =>
+  call.method === "GET" && (call.path === "/health" || call.path === "/")
+    ? {
+        body: { ok: true, service: "tasknest-api", build: "mock", provider: "fake", features: {} },
+      }
+    : undefined;
+
 export const extraHandlers: ExtraHandler[] = [
+  healthHandler,
   ...discoveryHandlers,
   ...bookingsHandlers,
   ...paymentsHandlers,

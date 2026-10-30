@@ -24,6 +24,17 @@ const noFloatMoney = [
   },
 ];
 
+// The UI never computes money: no `*` or `/` on anything named `...Cents` in the booking feature.
+// Amounts come from the server or an `@domain` helper (src/lib/preview.ts).
+const noUiMoneyMath = [
+  {
+    selector:
+      "BinaryExpression[operator=/^[*/]$/]:has(Identifier[name=/Cents$/], MemberExpression > Identifier.property[name=/Cents$/])",
+    message:
+      "The UI never computes money. Use a server response or an @domain helper (src/lib/preview.ts).",
+  },
+];
+
 export default defineConfig([
   globalIgnores([
     "**/dist/",
@@ -61,6 +72,12 @@ export default defineConfig([
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
     },
+  },
+
+  // Booking feature: no money arithmetic in the UI (rule 2 of the plan).
+  {
+    files: ["src/features/booking/**/*.{ts,tsx}"],
+    rules: { "no-restricted-syntax": ["error", ...noUiMoneyMath] },
   },
 
   // Edge Functions (Deno) + shared money domain.

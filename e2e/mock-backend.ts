@@ -215,9 +215,22 @@ export function makeDb(now = Date.now()): Record<string, Row[]> {
     expires_at: new Date(now + expOffset).toISOString(),
     created_at: new Date(now - 30 * 24 * H).toISOString(),
   });
+  const notifications: Row[] = [
+    {
+      id: "60000000-0000-4000-8000-000000000001",
+      user_id: IDS.ava,
+      kind: "booking_accepted",
+      booking_id: IDS.b72,
+      title: "Tara accepted your booking",
+      body: "Mount TV is confirmed.",
+      read_at: null,
+      created_at: new Date(now - 3 * H).toISOString(),
+    },
+  ];
   return {
     profiles,
     display_names: displayNames,
+    notifications,
     taskers: [
       {
         id: IDS.tara,
